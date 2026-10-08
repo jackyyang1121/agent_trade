@@ -1,0 +1,67 @@
+# 策略插拔盤。每天都會重讀這個檔，也會重讀 ETF投資策略說明文檔.md。
+# follow_prospectus: true 時，公開說明書正文沒有出現 keywords 的因子會自動關掉並把權重讓給其餘因子。
+# 隊員要改選股邏輯：調下面的 weight / params，或在 agent/factors.py 註冊新因子後加一段設定。
+follow_prospectus: true
+
+factors:
+  momentum:
+    weight: 0.34
+    keywords: [動能, 趨勢, 股價]
+    params:
+      lookback: 60
+      skip: 5
+  volume_trend:
+    weight: 0.08
+    keywords: [成交量]
+    params:
+      short: 20
+      long: 60
+  quality:
+    weight: 0.24
+    keywords: [品質, ROE, 現金, 估值, 本益, 淨值]
+    params: {}
+  growth:
+    weight: 0.20
+    keywords: [成長, 營收, 獲利]
+    params: {}
+  low_vol:
+    weight: 0.14
+    keywords: [波動, 風險]
+    params:
+      window: 20
+  dividend:
+    weight: 0.20
+    keywords: [股息, 殖息, 高息]
+    params: {}
+
+portfolio:
+  target_names: 24
+  min_names: 20
+  max_names: 30
+  max_orders: 30
+  keep_rank: 40
+  rebalance_band: 0.008
+  max_sector_weight: 0.40
+  cap_2330: 0.22
+  cap_other: 0.09
+  min_avg_turnover: 30000000
+  cash_by_regime:
+    risk_on: 0.04
+    neutral: 0.06
+    risk_off: 0.12
+  active_share_min: 0.20
+  active_share_buffer: 0.28
+
+regime_rules:
+  taiex_20_up: 0.03
+  taiex_20_down: -0.03
+  taiex_5_up: 0.012
+  taiex_5_down: -0.012
+  sox_up: 1.0
+  sox_down: -1.0
+  ndx_up: 0.8
+  ndx_down: -0.8
+  foreign_up_bn: 8
+  foreign_down_bn: -8
+  risk_on_score: 2
+  risk_off_score: -2

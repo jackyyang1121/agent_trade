@@ -1,0 +1,14 @@
+{
+  "cash": "1000000000.00",
+  "positions": {},
+  "last_settled_date": null,
+  "pending": null,
+  "nav_history": [
+    {
+      "date": "2026-10-08",
+      "nav": 1000000000.0,
+      "cash": 1000000000.0
+    }
+  ],
+  "reconciled": false
+}

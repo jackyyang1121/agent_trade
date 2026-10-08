@@ -1,0 +1,25 @@
+# 主辦方配發的隊伍代號。填好之後，決策書才會寫進「決策報告繳交紀錄」。
+team_id: ""
+
+# 每日執行這份程式的模型（D-Plan agent_metadata，自報用）
+model_provider: xai
+model_version: grok-4.7
+
+# 初始虛擬本金（新台幣）
+initial_capital: 1000000000
+
+# 競賽規定：買賣手續費 0.1425%、賣出證交稅 0.3%
+commission_rate: 0.001425
+tax_rate: 0.003
+lot: 1000
+
+# 價格歷史起點（要夠算 60 日動能）
+history_start: "2026-06-01"
+
+# 標的池凍結日：2026 年 7 月底上市市值前 100 + 上櫃市值前 50
+universe_as_of: "2026-07-31"
+universe_listed: 100
+universe_otc: 50
+
+# 10/26 為證交所休市（光復節補假），可交易的首日依行事曆為 10/27。若主辦口徑不同，改這一行。
+contest_first_trade_date: "2026-10-27"

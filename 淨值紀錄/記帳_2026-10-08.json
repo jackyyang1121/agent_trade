@@ -1,0 +1,11 @@
+{
+  "as_of": "2026-10-08",
+  "for_trade_date": "2026-10-12",
+  "cash": 1000000000.0,
+  "nav": 1000000000.0,
+  "cash_pct": 1.0,
+  "holdings_count": 0,
+  "daily_pnl": null,
+  "note": "本系統依均價結算",
+  "positions": []
+}

@@ -1,0 +1,18 @@
+---
+description: 使用者要求產生當日決策報告書時，執行交易系統並回報檔案位置
+alwaysApply: true
+---
+
+# 每日決策報告書
+
+使用者說「請生成今天的決策報告書」或同義要求時，在專案根目錄執行：
+
+```bash
+py -m agent run
+```
+
+- 不要手改 JSON。沒通過檢查就修程式後重跑。
+- 決策書一律寫入 `決策報告繳交紀錄/`，記帳在 `淨值紀錄/`。`team_id` 還沒填時檔名會是 `D-Plan_TEAM_PREVIEW_日期.json`，並提醒先補隊伍代號再上傳。
+- 回覆要給交易日、定價日、委託筆數、預估現金比、兩個檔案的完整路徑。
+- 提醒使用者仍須自己把 D-Plan 上傳到競賽系統，收件到該交易日 08:55。
+- 若程式要求 `config/settings.yaml` 的 team_id、`config/universe.csv` 或 `config/benchmarks.csv`，先說明去哪裡拿，不要用猜的代號。
