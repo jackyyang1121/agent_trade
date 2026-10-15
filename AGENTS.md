@@ -4,7 +4,7 @@
 
 本專案為 Evidence-Driven Asymmetric Momentum 的雙引擎研究、競賽 D-Plan 與 Forward Testing 系統。使用者主要使用 Windows、Cursor、bash 與 conda 環境 `agent_trade`；文件使用繁體中文，程式識別字可用英文。
 
-開始前先讀 `競賽說明文檔.md`、`docs/official/D-Plan_撰寫指南_v4.3.md`、`docs/official/DataPack_規格書_v4.3.md`、使用者提供的官方 Schema（檔名仍帶 v4.2，內容接受 4.x）、最新 `ETF投資策略說明文檔.md`、`config/` 及相關模組。官方規範若矛盾，保留可配置規則與明確確認狀態，不自行宣稱已解決。
+開始前先讀 `競賽說明文檔.md`、`docs/official/D-Plan_撰寫指南_v4.3.md`、`docs/official/DataPack_規格書_v4.3.md`、使用者提供的官方 Schem、最新 `ETF投資策略說明文檔.md`、`config/` 及相關模組。官方規範若矛盾，保留可配置規則與明確確認狀態，不自行宣稱已解決。
 
 ## 保護工作與範圍
 
@@ -12,6 +12,8 @@
 - 雲端任務已在隔離環境中；使用現有 checkout，除非使用者明確要求，不建立 Git worktree。
 - 不直接 merge／force push 至 main，不提交憑證、SQLite 運行狀態、個人庫存或外部研究授權內容。需要 PR 時以獨立分支和審核流程交付。
 - 不將 fixture／Mock 輸出放入正式提交目錄冒充競賽資料，不清除歷史帳本來繞過鎖或凍結。
+
+
 
 ## 架構與工程慣例
 
@@ -22,6 +24,8 @@
 - Mock／fixture 證據只存 `research_mock.sqlite3`，真實研究使用 `research.sqlite3`，查詢模擬庫須 `knowledge --synthetic`。來源版本引用須穿越訊號與 D-Plan 保持原文，不以最新版取代。
 - Q0／H1／H2、正式競賽與個人模式必須隔離狀態。產出、驗證、送件、成交、對帳是不同狀態。
 
+
+
 ## 模型與外部內容
 
 - 預設沿用使用者 Codex 可用模型，不硬編碼模型 ID，不要求預設 API Key。真實模型呼叫需明確 `--live`。
@@ -31,6 +35,8 @@
 - 研究網路需要明確 `research.allowed_domains`（已配置可信來源），空清單仍拒絕外部來源；`--live` 不放寬信任網域。Codex JSONL 沒有實際模型時，不能用請求模型冒充，正式模式 Fail Closed。
 - 沒有來源／時間／可核對證據時標明未知或 unavailable；推論、傳聞、技術潛力不得升級為正式事實。
 - Metadata 只報真實 provider、模型、時間與可取得用量；沒有用量就省略，不偽造信心或 token。
+
+
 
 ## 正式競賽不變條件
 
