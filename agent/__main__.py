@@ -69,6 +69,8 @@ def execute(args):
     if args.cmd == 'check':
         from agent.checks import schema_errors, semantic_errors
         from agent.compliance import structural_errors
+        if args.context is not None and not args.context.is_file():
+            raise PlanError(f'指定的驗證 context 不存在或不是檔案：{args.context}')
         document = json.loads(args.path.read_text(encoding='utf-8'))
         errors = schema_errors(document)
         context_path = args.context or args.path.with_suffix('.context.json')

@@ -234,7 +234,6 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
         if mode == "competition" and (any(t.get("synthetic") for t in theses) or any(s.get("synthetic") for s in research["sources"])):
             raise PlanError("正式研究含模擬證據，禁止產生交易書")
         research["decision_as_of"] = cutoff
-        atomic_json(research_path, research, immutable=True)
         atomic_json(frozen_snapshot_path, {"as_of": snapshot.as_of, "trade_date": day.isoformat(), "pricing_date": pricing.isoformat(),
                                           "prepared": prepared, "histories": snapshot.histories,
                                           "universe": snapshot.universe, "synthetic": snapshot.synthetic}, immutable=True)
@@ -247,6 +246,9 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
             metadata = research.get("metadata", {})
             validate_competition_inputs(settings, runtime, snapshot.universe, benchmarks, book.get_ledger(), day,
                                         datetime.fromisoformat(cutoff), research_run=metadata, pricing_date=pricing)
+        # 正式研究失敗時不可凍結成可重用的成功 checkpoint；登入或來源
+        # 恢復後應重新研究。已通過正式守門的結果仍保留不可變恢復能力。
+        atomic_json(research_path, research, immutable=True)
         portfolios = {}
         variants = ("H2",) if mode == "competition" else ("Q0", "H1", "H2")
         regime, _, counter = judge_regime(prepared["market"], strategy["regime_rules"])
