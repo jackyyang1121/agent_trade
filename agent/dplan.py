@@ -240,15 +240,33 @@ def render_dplan(
     inference_of: dict[str, str] = {}
 
     def evidence_observations(ticker: str) -> list[str]:
-        refs = []
+        # 質性原文和定價事實合列、分別引用來源；數值仍只填真實行情。
+        # 不為質性證據捏造 0/1 數字，也不為同一來源重複建立大量 observations。
+        observation = observations[int(stock_obs[ticker][1:]) - 1]
         for evidence in research_evidence.get(ticker, [])[:3]:
             key = evidence["key"]
             if key not in source_ids:
                 continue
-            refs.append(add_obs([key, "tpex" if markets.get(ticker) == "tpex" and "tpex" in source_ids else "twse"],
-                                f"來源摘錄（非獲利保證）：{evidence['excerpt']}；{ticker} 定價收盤 {prices[ticker]:.2f} 元",
-                                {"close": prices[ticker]}, "research"))
-        return refs
+            sid = source_ids[key]
+            if sid not in observation["source_ref"]:
+                observation["source_ref"].append(sid)
+                observation["statement"] = _clip(observation["statement"] + f"；{sid} 原文摘錄：「{evidence['excerpt'][:100]}」", 500)
+        return []
+
+    def research_reason(context: dict) -> str:
+        parts = []
+        for signal in context.get("research", [])[:2]:
+            if signal.get("claim"):
+                parts.append("研究假說：" + signal["claim"])
+            surprise = signal.get("fundamental_surprise") or {}
+            if surprise.get("interpretation"):
+                parts.append("預期差評估：" + surprise["interpretation"])
+            catalysts = [c.get("description", "") for c in signal.get("catalysts", [])]
+            if catalysts:
+                parts.append("催化劑（依證據保留不確定性）：" + "、".join(catalysts))
+            if signal.get("unknowns"):
+                parts.append("待驗證：" + "、".join(signal["unknowns"]))
+        return "；".join(parts)
 
     for index, item in enumerate(decisions, start=1):
         ticker = item["ticker"]
@@ -265,7 +283,9 @@ def render_dplan(
         context = decision_context.get(ticker)
         if context:
             reason = context.get("reason", "量化規則決策")
-            text = f"對照「{prospectus['name']}」。" + ("；".join(reason) if isinstance(reason, list) else str(reason))
+            detail = research_reason(context)
+            text = f"對照「{prospectus['name']}」。" + (detail + "；" if detail else "量化候選，未取得足夠個股基本面研究支持；")
+            text += "配置依據：" + ("；".join(reason) if isinstance(reason, list) else str(reason))
             text += f"；確定性風控後目標權重 {item['target_weight']:.2%}。"
         if funding:
             text += "這筆賣出同時用來騰出現金：它在目前持股裡分數較低，讓位對組合的因子暴露影響較小。"
@@ -315,7 +335,8 @@ def render_dplan(
         )
         if decision_context.get(ticker):
             reason = decision_context[ticker].get("reason", text)
-            text = ("；".join(reason) if isinstance(reason, list) else str(reason)) + "；風控後維持原股數。"
+            detail = research_reason(decision_context[ticker])
+            text = (detail + "；" if detail else "") + ("；".join(reason) if isinstance(reason, list) else str(reason)) + "；風控後維持原股數。"
         iid = add_inf([stock_obs[ticker], obs_taiex] + evidence_observations(ticker), text, None, f"{ticker} 續抱")
         no_trade_rows.append({"ticker": ticker, "reason_refs": [iid], "reason": _clip(f"偏離未逾 {band:.2%} 再平衡門檻", 300)})
 

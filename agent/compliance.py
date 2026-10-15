@@ -37,7 +37,7 @@ def _path(value) -> Path:
     return result if result.is_absolute() else ROOT / result
 
 
-def _manifest(value, label: str, errors: list[str]) -> dict:
+def _manifest(value, label: str, errors: list[str], *, allow_local: bool = False) -> dict:
     try:
         result = value if isinstance(value, dict) else json.loads(_path(value).read_text(encoding="utf-8"))
         if not isinstance(result, dict):
@@ -48,7 +48,8 @@ def _manifest(value, label: str, errors: list[str]) -> dict:
     if result.get("confirmed") is not True:
         errors.append(f"{label} 來源/完整性尚未由使用者確認")
     source = urlparse(str(result.get("source_url") or ""))
-    if source.scheme != "https" or not source.hostname or source.hostname in {"example.com", "example.org"} or source.hostname.endswith((".invalid", ".test")):
+    local_review = allow_local and not result.get("source_url") and bool(str(result.get("source_note") or "").strip())
+    if not local_review and (source.scheme != "https" or not source.hostname or source.hostname in {"example.com", "example.org"} or source.hostname.endswith((".invalid", ".test"))):
         errors.append(f"{label} 缺少真實 HTTPS 來源紀錄")
     return result
 
@@ -98,7 +99,7 @@ def validate_competition_inputs(
         except (KeyError, TypeError, ValueError):
             errors.append(f"正式競賽 {key} 必須為 {expected}")
 
-    manifest = _manifest(competition.get("universe_manifest"), "官方固定股票池", errors)
+    manifest = _manifest(competition.get("universe_manifest"), "官方固定股票池", errors, allow_local=True)
     _verify_hash(competition.get("official_universe_path"), manifest, "官方固定股票池", errors)
     if str(manifest.get("as_of")) != str(settings.get("universe_as_of", "2026-07-31")):
         errors.append("官方股票池凍結日與設定不一致")
@@ -128,6 +129,8 @@ def validate_competition_inputs(
         try:
             with _path(competition["official_etf_list_path"]).open(encoding="utf-8-sig", newline="") as handle:
                 codes = [row["ticker"].strip() for row in csv.DictReader(handle)]
+            if competition.get("benchmark_etf_limit") is not None:
+                codes = codes[:int(competition["benchmark_etf_limit"])]
             if not codes or any(not code for code in codes) or len(set(codes)) != len(codes):
                 raise ValueError("官方 ETF 名單為空、缺少代號或包含重複代號")
             if set(codes) != set(benchmarks):
@@ -146,7 +149,7 @@ def validate_competition_inputs(
         errors.append("Active Share 基準為空，禁止標記可提交")
     for etf_id, weights in benchmarks.items():
         try:
-            if len(weights) != 15 or any(not re.fullmatch(r"[0-9]{4}", str(ticker)) or not math.isfinite(float(weight)) or float(weight) <= 0 for ticker, weight in weights.items()):
+            if len(weights) != 15 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,39}", str(ticker)) or not math.isfinite(float(weight)) or float(weight) <= 0 for ticker, weight in weights.items()):
                 raise ValueError("需要完整前 15 大持股的正數權重")
             if sum(map(float, weights.values())) > 1.000001:
                 raise ValueError("基準原始權重總和超過 100%")

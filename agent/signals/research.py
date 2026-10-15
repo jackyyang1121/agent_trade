@@ -56,6 +56,12 @@ def research_signal(thesis: dict, as_of: str) -> dict:
         stage = "confirmed_acceleration" if recognition >= 0.5 else "early_validation"
     elif evidence >= 0.5 and verifiable_surprise:
         stage = "early_validation"
+    elif (status == "early_validation" and source_ids and evidence >= 0.5
+          and thesis.get("adversarial_reviewed") and thesis.get("risks")
+          and {s.get("name") for s in thesis.get("scenarios", [])} == {"bull", "base", "bear"}):
+        # 可驗證的質性產業變化也可進入小額試探，不強迫模型編造共識數字。
+        # 沒有數字預期差不會取得 surprise priority 或 confirmed_acceleration。
+        stage = "early_validation"
     else:
         stage = "early_discovery"
     # An explicit discovery/watchlist state cannot be promoted merely because
@@ -71,7 +77,7 @@ def research_signal(thesis: dict, as_of: str) -> dict:
         scenarios.append({"name": item.get("name", "unknown"), "description": item.get("description", ""),
                           "upside": finite(item.get("upside")), "downside": finite(item.get("downside")),
                           "assumptions": item.get("assumptions", [])})
-    return {"ticker": str(thesis.get("ticker", "")), "thesis_id": thesis.get("id"), "as_of": as_of,
+    return {"ticker": str(thesis.get("ticker", "")), "thesis_id": thesis.get("id"), "claim": thesis.get("claim", ""), "as_of": as_of,
             "evidence_as_of": dated, "source_ids": source_ids,
             "source_versions": dict(thesis.get("source_versions", {})),
             "counter_source_ids": sorted(set(thesis.get("counter_source_ids", []))),
@@ -82,4 +88,5 @@ def research_signal(thesis: dict, as_of: str) -> dict:
             "thesis_risk": risk, "stage": stage, "eligible": eligible,
             "adversarial_reviewed": bool(thesis.get("adversarial_reviewed") or thesis.get("counter_source_ids")),
             "scenarios": scenarios, "risks": thesis.get("risks", []), "unknowns": thesis.get("unknowns", []),
+            "catalysts": catalysts,
             "scale_note": "uncalibrated_evidence_grades_not_probabilities"}

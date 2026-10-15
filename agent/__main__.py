@@ -31,6 +31,15 @@ def parser():
         q.add_argument('--fixture', type=Path)
         q.add_argument('--dry-run', action='store_true')
         q.add_argument('--no-research', action='store_true')
+    q = sub.add_parser('rehearse', help='賽前真實模型演練：今天視為首日，模擬十億元帳戶，報告禁止正式提交')
+    _common(q); _research_args(q)
+    q.add_argument('--date', type=parse_date)
+    q.add_argument('--skip-benchmarks', action='store_true', help='快速看研究報告時略過 ETF 搜尋；會標示未驗證 Active Share')
+    q = sub.add_parser('refresh-benchmarks', help='用 Codex 查前十檔 ETF 前十五大持股，核對原文後更新 benchmarks.csv')
+    _common(q); _research_args(q)
+    q.add_argument('--date', type=parse_date, help='持股資料不可晚於此定價日，預設前交易日')
+    q = sub.add_parser('cleanup-shadow', help='清除舊 Shadow 中無新模型依據的報告，保留帳本')
+    _common(q)
     q = sub.add_parser('research', help='有預算限制的產業／公司研究')
     _common(q); _research_args(q); q.add_argument('--ticker')
     q = sub.add_parser('knowledge', help='圖譜及研究資料庫查詢')
@@ -46,7 +55,8 @@ def parser():
     for name in ('import-universe', 'import-benchmarks'):
         q = sub.add_parser(name); _common(q)
         q.add_argument('path', type=Path)
-        q.add_argument('--source-url', required=True)
+        q.add_argument('--source-url')
+        q.add_argument('--source-note', help='已核對本機官方股票池 PDF 的來源記錄')
         q.add_argument('--as-of', required=True)
         q.add_argument('--confirm', action='store_true', help='僅在已核對官方完整資料後設定')
         q.add_argument('--definition', choices=['top10_normalized', 'top10_raw', 'top15_normalized', 'top15_raw', 'full_normalized'])
@@ -62,7 +72,18 @@ def execute(args):
     from agent.config import load_settings
     from agent.orchestration.configuration import load_runtime
     from agent.orchestration.daily import daily, load_sources, perform_research, state_path
-    if args.cmd in {'daily', 'run'}:
+    if args.cmd == 'cleanup-shadow':
+        from agent.orchestration.outputs import clean_unresearched_shadow
+        runtime = load_runtime(args.config)
+        roots = [state_path(runtime, args.state_dir) / 'shadow']
+        if args.state_dir is None:
+            roots += [ROOT / 'runtime' / 'shadow']
+        return {'cleanup': [clean_unresearched_shadow(root) for root in dict.fromkeys(roots)]}
+    if args.cmd in {'daily', 'run', 'rehearse'}:
+        if args.cmd == 'rehearse':
+            return daily(mode='rehearsal', trade_date=args.date, runtime_path=args.config, state_dir=args.state_dir,
+                         provider=args.provider, model=args.model, live=args.live, offline=args.offline,
+                         sources_path=args.sources, skip_benchmarks=args.skip_benchmarks)
         return daily(mode=args.mode, trade_date=args.date, runtime_path=args.config, state_dir=args.state_dir,
                      provider=args.provider, model=args.model, offline=args.offline, fixture=args.fixture,
                      sources_path=args.sources, live=args.live, no_research=args.no_research, dry_run=args.dry_run)
@@ -85,6 +106,19 @@ def execute(args):
                 'warnings': warnings + ([] if context_path.exists() else ['無帳本context，未驗證股數/現金/Active Share，不代表正式可提交'])}
     runtime = load_runtime(args.config)
     state_dir = state_path(runtime, args.state_dir)
+    if args.cmd == 'refresh-benchmarks':
+        if not args.live or args.offline or args.provider == 'mock':
+            raise PlanError('ETF 更新需要 --live，不能用 Mock 資料更新真實基準')
+        from agent.calendar_tw import previous_trading_day
+        from agent.market import FALLBACK_CLOSED
+        from agent.research.benchmarks import refresh
+        from agent.orchestration.outputs import output_roots
+        if args.provider:
+            runtime['llm']['provider'] = args.provider
+        if args.model:
+            runtime['llm']['model'] = args.model
+        return refresh(runtime, output_roots(args.state_dir)[1] / 'benchmarks.csv',
+                       args.date or previous_trading_day(taipei_now().date(), FALLBACK_CLOSED))
     if args.cmd in {'import-book', 'mark-submitted'}:
         from agent.compliance import CompetitionBook
         book = CompetitionBook(state_dir / 'competition', load_settings()['initial_capital'])
@@ -102,13 +136,20 @@ def execute(args):
         ledger = book.reconcile(raw, args.pricing_date)
         result = {'status': 'RECONCILED', 'as_of': ledger.last_settled_date, 'positions': len(ledger.positions)}
         if ledger.official_data:
+            import hashlib
+            from agent.orchestration.outputs import output_roots
+            from agent.orchestration.io import atomic_json
+            digest = hashlib.sha256(args.path.read_bytes()).hexdigest()[:12]
+            source = ledger.official_data
+            archive = output_roots(args.state_dir)[1] / 'official' / f"{source['team_id']}_{source['trade_date']}_{digest}.json"
+            atomic_json(archive, source, immutable=True)
             result.update(trade_date=ledger.official_data['trade_date'], prev_day_orders=ledger.official_data['prev_day_orders'],
-                          account=ledger.official_data['account'], compliance=ledger.official_data['compliance'])
+                          account=ledger.official_data['account'], compliance=ledger.official_data['compliance'], archive=str(archive))
         return result
     if args.cmd in {'import-universe', 'import-benchmarks'}:
         from agent.orchestration.imports import import_data
         return import_data(args.cmd.removeprefix('import-'), args.path, state_dir, source_url=args.source_url,
-                           as_of=args.as_of, confirmed=args.confirm, definition=args.definition)
+                           source_note=args.source_note, as_of=args.as_of, confirmed=args.confirm, definition=args.definition)
     if args.cmd == 'evaluate':
         from agent.evaluation import ForwardTracker
         reports = []
@@ -153,15 +194,19 @@ def execute(args):
         if args.offline and runtime['llm']['provider'] != 'mock':
             raise PlanError('離線研究需明確 --provider mock')
         universe = read_universe(ROOT / 'data' / 'universe' / 'universe.csv')
-        return perform_research(runtime, state_dir, [r['ticker'] for r in universe], {}, stamp(taipei_now()),
-                                load_sources(args.sources), ticker=args.ticker)
+        result = perform_research(runtime, state_dir, [r['ticker'] for r in universe], {}, stamp(taipei_now()),
+                                  load_sources(args.sources), ticker=args.ticker)
+        if args.live and not result['metadata'].get('success'):
+            raise PlanError('研究未成功：' + '；'.join(result.get('limitations', [])))
+        return result
     raise PlanError('未知指令')
 
 
 def main():
     import sys
     if len(sys.argv) == 1:
-        sys.argv.extend(['daily', '--mode', 'shadow'])
+        parser().print_help()
+        return
     try:
         result = execute(parser().parse_args())
         if isinstance(result, dict) and 'portfolios' in result:

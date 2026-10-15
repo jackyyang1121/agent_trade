@@ -1,125 +1,88 @@
 # 每日操作流程
 
-以下命令於 Repository 根目錄的 bash 執行，時間一律以台北時區 `+08:00` 解讀。先執行 `conda activate agent_trade`，確認這個環境已安裝 `requirements.txt`。
+在 Repository 根目錄的 bash 執行 `conda activate agent_trade`。時間一律為台北 `+08:00`。
 
-## 1. 系統與離線流程
-
-```bash
-python -m agent status
-python scripts/create_demo_fixture.py --output data/runtime/demo_market.json
-python -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json
-python -m agent evaluate
-```
-
-離線模式必須指定明確標示 synthetic 的 fixture 與 Mock，不會自動生成行情。產生器預設合成交易日為 `2026-10-15`，可用 `--date` 改成測試用平日；它使用平日日曆，並非官方交易日曆。daily 的 `--date` 若提供，必須和 fixture 相符。`--state-dir` 隔離實驗。請從實際輸出取得 Run ID、報告、D-Plan 與帳本位置。不要將這些輸出上傳競賽。
+## 賽前演練
 
 ```bash
-python -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json --state-dir data/experiments/demo
-python -m agent evaluate --state-dir data/experiments/demo
-```
-
-同日重跑應返回已凍結結果；需要比較新策略時使用新版本與狀態目錄。不要刪除帳本來避開保護。
-
-## 2. 單獨研究與記憶查詢
-
-```bash
-python -m agent research --provider mock --offline
-python -m agent knowledge --synthetic
-python -m agent research --ticker 3363 --provider codex_cli --live
-python -m agent knowledge
-python -m agent knowledge --query "量產瓶頸"
-python -m agent knowledge --technology "CPO"
-python -m agent knowledge --ticker 3363
-```
-
-使用 `research --sources C:/data/research_sources.json` 匯入已合法取得的來源；資料格式見 [資料來源](DATA_SOURCES.md)。來源 manifest 可以提供合法正文，或指向 `research.source_roots` 內已授權文字檔；不會自動掃描所有資料夾。沒有可驗證來源時，結論停留於未驗證假說或研究佇列。預設 Mock 不新增假說，結構化研究完整流程使用測試中明確的模型回應 fixture 驗證。來源未能取得應保留 unavailable，不能由模型自行補成事實。
-
-`knowledge` 預設只讀 `research.sqlite3`；Mock／fixture 研究寫入 `research_mock.sqlite3`，須加 `--synthetic` 才會讀取。`status` 同時顯示兩者，模擬證據不會被正式模式讀入。
-
-Codex 真實呼叫須 `--provider codex_cli --live`；`--model` 僅在希望覆寫現有模型時使用。模型設定統一放在 `runtime.yaml`，舊 settings 中的 xAI 固定值已移除。Mock／offline 不啟動 Codex。`--no-research` 用於明確跳過新研究，報告必須標示此次無新 GPT 研究；不能把快取或 Quant baseline 包裝成當日模型決策。
-
-下載研究來源前，另在 `research.allowed_domains` 明確列出可信網域，包含所用搜尋端點及來源網站；預設 `[]` 拒絕外部來源網路。`--live` 不自動解除此限制。合法授權的本機內容仍可用 source manifest 匯入。
-
-## 3. 真實 Shadow Forward Test
-
-```bash
+PYYAML_FORCE_LIBYAML=0 python -m pip install -r requirements.txt
 codex login status
-python -m agent daily --mode shadow --provider codex_cli --live
+python -m agent cleanup-shadow
+python -m agent rehearse --live --skip-benchmarks
+```
+
+未登入時先 `codex login`。移除 `--skip-benchmarks` 即包含前十檔 ETF 的十五大持股更新；也可獨立執行 `python -m agent refresh-benchmarks --live`。
+
+`rehearse` 預設今天為首次交易日（休市順延），用前交易日收盤行情定價。若在盤中或收盤後執行，會保留真實研究時間；這是報告預覽，不是事前凍結的投資績效。每次產生新的十億元全現金模擬 DataPack，不會匯入正式帳本、改寫既有 Forward 預測或模擬當日已成交。
+
+輸出的 `report`、`portfolios.H2.path`、`datapack` 分別指向可讀報告、v4.3 D-Plan 與模擬帳戶。報告預設在 `決策報告繳交紀錄/演練/`，模擬 DataPack 在 `DataPack/simulated/`；禁止將這類檔案上傳競賽。重跑是新演練，不累積初始帳戶績效；真實研究記憶保留於 `data/runtime/rehearsal/research.sqlite3`；可用 `python -m agent knowledge --state-dir data/runtime/rehearsal` 查詢，與一般研究庫分開。
+
+無來源、新研究未成功或來源只有模型猜測時不產出 D-Plan；診斷在終端列出的 `research_failure.json`，原始失敗來源仍可在研究庫追查。`--provider mock --offline` 只用於工程測試，不會執行 GPT。
+
+## 清理舊報告與輸出位置
+
+`cleanup-shadow` 同時檢查目前 `state_dir/shadow` 及舊 `runtime/shadow`。只移除 summary 明示無新模型研究、或 D-Plan 明示量化／Mock 的報告，不刪 SQLite、來源、行情快照、正式資料或無法辨識的檔案；以 `CLEANED.json` 標記避免復用失效報告。已在本機生成且未推送的檔案，需在本機執行此命令。
+
+| 位置 | 用途 |
+| --- | --- |
+| `決策報告繳交紀錄/演練/` | 模擬初始帳戶、真實行情及 GPT 的報告預覽 |
+| `決策報告繳交紀錄/正式/` | 正式模式已驗證的待上傳 D-Plan |
+| `決策報告繳交紀錄/影子/`、`個人/`、`離線測試/` | 各模式報告，互相隔離 |
+| `DataPack/official/` | 後台 DataPack 原始帳戶與淨值紀錄 |
+| `DataPack/simulated/` | 明確標記的初始模擬帳戶 |
+| `DataPack/benchmarks.csv` | 模型查詢、Python 核對的 ETF 持股及日期來源 |
+| `DataPack/benchmark_updates/` | ETF 原文快照、核對與失敗紀錄 |
+| `DataPack/legacy/` | 舊淨值檔保留；不能當正式 DataPack |
+| `data/runtime/` | 內部研究庫、帳本、checkpoint 與 Forward 紀錄 |
+
+以上運行資料不納入 Git。`--state-dir PATH` 改為在該目錄下保存 `reports/`、`DataPack/` 及內部狀態，不污染預設資料。
+
+## 正式比賽
+
+已設定隊伍代號 `11329`、已核對的固定 150 檔股票池、10/27 首日與 11/27 末日。股票池使用本機官方 PDF 核對紀錄與 SHA-256，不需要下載 URL。若以新 CSV 重新匯入，可用：
+
+```bash
+python -m agent import-universe path/to/universe.csv --source-note "已核對的官方 PDF 名稱及版本" --as-of 2026-07-31 --confirm
+```
+
+將回傳的 path/manifest 填入 runtime。ETF 基準依目前使用者設定取參考清單前十檔、每檔前十五大原始 NAV 權重；自動更新保留資料來源與日期。正式模式仍須確認競賽要求是否涵蓋更多 ETF，以及 `top15_normalized` 或 `top15_raw` 計算口徑；演練的預設計算不冒充主辦確認。
+
+正式當日先從後台下載 DataPack，接著：
+
+```bash
+python -m agent import-book path/to/DataPack.json --pricing-date YYYY-MM-DD
+python -m agent daily --mode competition --live
+```
+
+`--pricing-date` 填前交易日，不能直接照抄 placeholder。匯入會核對資料包的 team_id、結算日、現金、持股、nav_tradable、aum 與應收權益；首次 `as_of_date: null` 只有真正全現金才有效。原始 DataPack 也保存在 `DataPack/official/`，供後續查閱帳戶與績效。自建／模擬 DataPack 不可匯入正式帳本。
+
+D-Plan 使用你提供、版本欄位為 `4.x` pattern 的官方 Schema，輸出 `4.3`。目前原檔名仍含 v4.2；不需要重複提供或手動改內容。原版 v4.3 指南與 DataPack 規格見 [官方文件](official/)。
+
+正式模式缺官方 DataPack、必要行情、完整設定基準或可追溯實際模型時停止；演練不代表正式送件條件已齊備。Codex 未回報實際型號時，正式模式仍阻擋，不能把請求型號當實際型號。
+
+## 驗證、上傳、對帳
+
+```bash
+python -m agent check path/to/D-Plan.json
+```
+
+會讀取同名 `.context.json` 重算股數、現金與限制；沒有 context 時只有 Schema／引用驗證。明確指定不存在的 `--context` 會失敗。
+
+收件窗為前一日 19:30 至交易日 08:55。到後台上傳、通過驗證後，仍須按正式提交並確認當日委託成功；上傳不等於送件。取得真實成功收件證據才記錄：
+
+```bash
+python -m agent mark-submitted ACTUAL_RUN_ID --receipt "實際成功收件證據"
+```
+
+生成、VALIDATED、SUBMITTED、成交與官方對帳分開。每日最多 25 次是提交次數，並非單份委託筆數。D-Plan 股數由 Python 依官方千股取整公式與實際結算庫存推導，不由模型直接填寫。下一日重新下載 DataPack 核對，不把本機 orders 當作已成交。
+
+## 持續 Forward 與研究
+
+```bash
+python -m agent research --ticker 3363 --live
+python -m agent knowledge --query "供應鏈瓶頸"
+python -m agent daily --mode shadow --live
 python -m agent evaluate
 ```
 
-先確認市場與來源能存取。系統為 Q0／H1／H2 保存獨立帳本、候選、訊號、委託與凍結版本，各組分別 checkpoint；若中途失敗，重跑復用已完成部分。模擬成交依可取得的後續價格結算，尚未發生的成交及 1／5／10／20 日預測保持 PENDING；不使用前日收盤價假裝當日實際成交。
-
-研究失敗時 Shadow 可以依政策使用既有研究或 Quant baseline 繼續，但會記錄降級與錯誤。行情不足不能計算的 NAV／報酬保持未知。評估需累積後續交易日資料，單日初始化不會得到有意義的績效曲線。
-
-## 4. 正式競賽準備
-
-正式啟用前確認：
-
-1. 在 `config/settings.yaml` 填入主辦方配發的 `team_id`。
-2. 匯入官方固定 150 檔股票池，確認名單來源與凍結日。
-3. 匯入完整主動 ETF 前十大持股資料，確認比較對象、權重尺度及資料時點。
-4. 匯入主辦方實際庫存與現金；首次空倉也必須使用經確認的初始帳本。
-5. 依主辦方公告確認賽程、交易日與 Active Share 計算口徑，完成 runtime 的正式確認設定。
-6. 確認前交易日行情與每檔持股定價完整，Codex 研究可用並留下真實 Metadata。
-
-Codex adapter 已實作但尚未完成 Live 研究驗證；若 CLI 事件未回報實際模型名稱，正式模式仍會阻擋，即使已用 `--model` 請求某模型。不能把請求名稱當成實際執行證明。
-
-以下 bash 先輸入實際資料的來源與日期，不使用虛構官方網址。只有完成核對後才使用 `--confirm`：
-
-```bash
-read -r -p "官方固定股票池的 HTTPS 來源 URL: " UniverseUrl
-read -r -p "官方股票池凍結日 YYYY-MM-DD: " UniverseDate
-read -r -p "完整主動 ETF 持股的 HTTPS 來源 URL: " BenchmarkUrl
-read -r -p "基準資料日期 YYYY-MM-DD: " BenchmarkDate
-read -r -p "官方庫存對應的前交易日 YYYY-MM-DD: " PricingDate
-read -r -p "主辦方確認的定義 top15_normalized 或 top15_raw: " ActiveShareDefinition
-python -m agent import-universe "C:/data/official_universe.csv" --source-url "$UniverseUrl" --as-of "$UniverseDate" --confirm
-python -m agent import-benchmarks "C:/data/active_etfs.csv" --source-url "$BenchmarkUrl" --as-of "$BenchmarkDate" --definition "$ActiveShareDefinition" --confirm
-python -m agent import-book "C:/data/DataPack.json" --pricing-date "$PricingDate"
-```
-
-匯入會回傳 `path` 與 `manifest`。目前不會自動改寫 `config/runtime.yaml`；將股票池輸出的路徑填入 `competition.official_universe_path`、`competition.universe_manifest`，基準輸出填入 `competition.benchmarks_path`、`competition.benchmarks_manifest`。在已核對賽程後設定 `schedule_confirmed: true`、真實 `first_trade_date` 與 `last_trade_date`；需要不同環境設定可用 `--config C:/data/runtime.yaml`，不必改 Python。
-
-`import-book` 可直接匯入後台下載的官方 DataPack，亦保留原 `as_of/cash/positions` 帳本相容性。v4.3 規格書中的 DataPack JSON 版本仍是 `3.0`。`--pricing-date` 是必要定價日，不是資料包產生日期；匯入器核對 `as_of_date`，正式流程另核對隊伍及 `trade_date`。首日全現金且 `as_of_date: null` 是有效資料，不會捏造結算日期。`prev_settlement`、`prev_close` 或未知部位會阻擋並保留原帳本。應收配息／配股保留供核對，不能當作可動用現金或可賣股數；`nav_tradable` 與 `aum` 分開處理，行情估值不符官方 NAV 時禁止計算委託。若官方可交易庫存含非整張，現有下單公式仍停止處理，不會截斷股數。
-
-正式 D-Plan 要求 v4.3。取得**官方原始 JSON Schema**後，放在根目錄 `D-Plan.schema_v4.3.json`，重新啟動 CLI；輸出、驗證與程式版本雜湊會使用該檔。缺少時僅保留 v4.2 離線相容驗證，正式模式停止；不要修改舊 Schema 的版本字串或降低 `required_dplan_schema_version` 來繞過。加入官方原檔後仍需用官方範例驗證欄位與限制，不能把目前離線測試當作已完成 v4.3 上線驗證。`status` 會顯示實際與要求的 Schema 版本。
-
-```bash
-python -m agent status
-python -m agent daily --mode competition --provider codex_cli --live
-```
-
-資料匯入格式見 [資料來源](DATA_SOURCES.md)。`--confirm` 僅記錄資料核對，不會向主辦方遠端驗證。缺 Active Share 基準、官方確認或帳本時，正式模式採 Fail Closed。Repository 文件對競賽首日提及 10/26，既有設定因休市處理使用 10/27；必須以主辦方賽程與交易所日曆核對後配置，不能只根據本機日期猜測。
-
-正式 v4.3 必須使用後台 DataPack。原 `as_of/cash/positions` 格式僅保留舊版相容與內部測試用途，不能代替新協議下的官方資料包。
-
-## 5. 驗證、人工上傳與確認
-
-```bash
-python -m agent check "C:/data/D-Plan_TEAM_XXX_YYYY-MM-DD.json"
-python -m agent check "C:/data/D-Plan_TEAM_XXX_YYYY-MM-DD.json" --context "C:/data/validation_context.json"
-```
-
-`check` 會自動尋找 JSON 同名的 `.context.json`；也可以明確提供 `--context`。沒有完整 context 時，獨立檔案檢查只能確認可觀察的格式／引用，不代表官方帳本、現金及 Active Share 均已通過。正式 daily 的驗證使用當次真實狀態。不要手改已產出的 JSON、股數或理由；修正資料／設定後，在允許的版本流程重新產生。
-
-D-Plan 檔名為 `D-Plan_<team_id>_<trade_date>.json`。交易股數由官方公式推導：
-
-```text
-目標股數 = floor(目標權重 × 前日 NAV ÷ 前日收盤價 ÷ 1000) × 1000
-委託股數 = 目標股數 − 主辦方實際結算股數
-```
-
-人工上傳至競賽系統。依 Repository 規則，收件窗為前一日 19:30 至交易日上午 08:55，每隊每日最多 25 次；在正式運行前仍須確認主辦方最新公告。程式不會替你按送件，也不會將產出自動當作已提交。
-
-只有拿到主辦方成功收件的真實憑證後，才執行：
-
-```bash
-python -m agent mark-submitted ACTUAL_RUN_ID --receipt ACTUAL_RECEIPT
-```
-
-該命令記錄送件事實，不是執行交易。之後匯入官方結算庫存／現金完成對帳；無成交或停牌個股不能假設全部成交，超賣會使整份 D-Plan 被拒收。
-
-## 6. 例行檢視
-
-閱讀當日 Markdown 報告的新增證據、Thesis 增減、雙向候選、反方證據、未交易理由、研究限制與待辦。查看 `evaluate` 的成本、NAV、MDD、到期預測及錯過機會歸因。新的研究資料只能影響後續決策，不能回寫已凍結預測。
+Shadow 三組 Q0/H1/H2 在截止前凍結，後續 session 才依 VWAP 模擬結算；1/5/10/20 日預測未到期時保持 PENDING。與演練、正式及個人帳本分開，不能以刪除歷史帳本繞過凍結。

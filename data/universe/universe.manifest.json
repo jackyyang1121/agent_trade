@@ -1,0 +1,9 @@
+{
+  "path": "data/universe/universe.csv",
+  "sha256": "07f277d2ae8c86e9cdb682d785c0aa2b264227cf1111e08d082adf30ded26e97",
+  "as_of": "2026-07-31",
+  "confirmed": true,
+  "source_url": null,
+  "source_note": "使用者已核對本機官方 PDF：玉山挑戰賽_投資組合及交易標的_150檔清單_v1；上市100檔、上櫃50檔。此雜湊固定已核對的 CSV，未宣稱已取得 PDF 檔案。",
+  "confirmation_method": "user_confirmed_local_official_pdf"
+}

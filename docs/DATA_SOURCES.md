@@ -10,7 +10,7 @@
 | 金融研究 | 合法公開或授權的券商／投信報告、基金持股 | 尊重付費與授權；沒有免費 API 時使用合法取得的匯入檔 |
 | 公開討論 | 新聞、專家文章、公開社群內容 | 不代表已查證；無法存取時標 unavailable，不繞過登入或付費限制 |
 
-來源種類的支援表示有共用輸入與封存介面，不代表已為每個網站實作爬蟲或取得商業資料權利。預設研究網路開關關閉，來源 manifest 透過 `--sources` 傳入，亦可指向授權 `source_roots`（預設 `inbox/research`）內的文字檔；系統不自動掃描整個資料夾。外部來源擷取還需要 `research.allowed_domains` 明確列出可信網域，預設空清單拒絕；`--live` 不放寬清單。合法公開搜尋端點及每次重新導向後的來源網址也受限制，另有來源數、研究時間與取得錯誤處理。
+來源種類的支援表示有共用輸入與封存介面，不代表已為每個網站實作爬蟲或取得商業資料權利。預設研究網路開關關閉，來源 manifest 透過 `--sources` 傳入，亦可指向授權 `source_roots`（預設 `inbox/research`）內的文字檔；系統不自動掃描整個資料夾。外部來源擷取還需要 `research.allowed_domains` 明確列出可信網域，預設已配置公開市場、公司與金融新聞網域；空清單仍拒絕，`--live` 不放寬清單。合法公開搜尋端點及每次重新導向後的來源網址也受限制，另有來源數、研究時間與取得錯誤處理。
 
 ## 研究來源 JSON
 
@@ -62,14 +62,14 @@ SQLite 保存 source version、Entity／Edge version、Thesis history 與證據�
 主動 ETF 基準 CSV 欄位為：
 
 ```csv
-etf_id,etf_name,ticker,weight
+etf_id,ticker,weight,source_url,as_of,fetched_at,content_sha256
 ```
 
-`weight` 使用小數，例如 `0.08` 表示 8%，不得混用 `8`。每個需要比較的 ETF 都要有完整、正確時點的前十大持股；空檔或只有部分 ETF 不能聲稱完整合規。請保留原始資料來源與日期。正式模式還要求確認 Active Share 的比較範圍、前十大權重是否重新正規化等口徑，不能自行把研究預設當成主辦方定義。
+`weight` 使用小數，例如 `0.08` 表示 8%，不得混用 `8`。每個需要比較的 ETF 都要有完整、正確時點的前十五大持股；空檔或只有部分 ETF 不能聲稱完整合規。請保留原始資料來源與日期。正式模式還要求確認 Active Share 的比較範圍、前十五大權重是否重新正規化等口徑，不能自行把研究預設當成主辦方定義。
 
 ## 官方庫存匯入
 
-`import-book PATH` 接受：
+正式 v4.3 請使用後台 DataPack JSON（資料版本仍是 3.0）；匯入後副本保存於 `DataPack/official/`，同時提供帳戶與淨值觀察。詳細格式見 [DataPack 規格](official/DataPack_規格書_v4.3.md)。以下舊格式只保留相容性，不能代替正式 DataPack：
 
 ```json
 {
@@ -87,4 +87,10 @@ etf_id,etf_name,ticker,weight
 
 官方 JSON 的 `authority` 依內容性質填 `twse/tpex/taifex/mops/fininst/media/vendor/other`，與內部研究 `source_type` 不同。來源、Observation、Inference、Decision、Order 必須連續引用。新聞與易變來源建議保留合法原文快照及真實 `archive_url`，不捏造存檔網址。
 
-v4.2 Schema 的 `observations.values` 要求至少一個真實數字。純質性證據保留於 SQLite 與 Markdown；只有可核對的實際數值才能進 `values`，不能為通過驗證而塞入虛構的 0／1、信心分數或訂單數字。正式 D-Plan 不能擅自加入內部研究欄位。
+v4.3 Schema 的 `observations.values` 要求至少一個真實數字。完整質性證據保留於 SQLite 與 Markdown，D-Plan 可在真實行情觀察中並列原文摘錄、分別引用其來源，並在推論交代研究假說；只有可核對的實際數值才能進 `values`，不能為通過驗證而塞入虛構的 0／1、信心分數或訂單數字。正式 D-Plan 不能擅自加入內部研究欄位。
+
+## 自動搜尋與 ETF 更新
+
+`auto_discover: true` 使用 Codex 唯讀的原生 web search 取得候選 URL，來源探索計入研究呼叫與時間預算。模型不能直接提供原文；Python 另抓正文，核對原頁 meta／datePublished 的發布時間，並保存來源版本。搜尋摘要、不可讀頁面及沒有可核對時間的文章不當作事實證據。其他 provider 使用 `auto_discover: false` 並提供合法來源 manifest。
+
+`refresh-benchmarks --live` 查詢參考表原順序前十檔 ETF 的十五大持股，保留原基金 NAV 權重（CSV weight 為小數），核對原文附近的代號／數字與資料日期；HTML／文字／PDF 擷取受網域、資料量與頁數限制。這是有限的數字核對，不保證語意或排名絕對正確；不完整更新不覆寫舊檔。原文與失敗紀錄在 `DataPack/benchmark_updates/`，完整性確認與 Active Share 官方公式確認仍分開。比較範圍不等於全部三十檔。

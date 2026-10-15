@@ -10,13 +10,49 @@ llm:
   max_retries: 1
   allow_live: false
 research:
+  # --live 時先用 Codex 原生搜尋，再以 Python 擷取並封存正文。
+  auto_discover: true
   max_rounds: 3
   max_model_calls: 3
   max_sources: 20
   max_seconds: 3600
   max_tasks: 10
   allow_network: false
-  allowed_domains: []
+  allowed_domains:
+    - twse.com.tw
+    - tpex.org.tw
+    - taifex.com.tw
+    - tsmc.com
+    - tsmc.com.tw
+    - honhai.com
+    - deltaww.com
+    - mediatek.com
+    - nvidia.com
+    - amd.com
+    - trendforce.com
+    - technews.tw
+    - cna.com.tw
+    - money.udn.com
+    - moneydj.com
+    - news.cnyes.com
+    - reuters.com
+    - digitimes.com
+    - sitca.org.tw
+    - nomurafunds.com.tw
+    - capitalfund.com.tw
+    - e-fund.com.tw
+    - ezmoney.com.tw
+    - ctbcinvestments.com
+    - ctbcinvestments.com.tw
+    - allianzgi.com
+    - tsit.com.tw
+    - jpmorgan.com
+    - fuhwa.com.tw
+    - fuhwa.com
+    - yuantaetfs.com
+  search_queries:
+    - 台灣 跨產業 供需變化 產業瓶頸 財報 指引 預期差
+    - 技術革新 量產 驗證 供應鏈 競爭替代 反方證據
   source_roots: [inbox/research]
   sources: []
 signals:
@@ -26,21 +62,24 @@ signals:
   max_correlated_weight: 0.25
   min_score_improvement: 0.15
 competition:
-  # 需取得官方原檔置於根目錄 D-Plan.schema_v4.3.json；缺少時正式模式停止。
+  # 使用者提供的官方 Schema（原檔名仍帶 v4.2）接受 4.x，新輸出為 4.3。
   required_dplan_schema_version: '4.3'
   # 已對過本機 PDF「玉山挑戰賽_投資組合及交易標的_150檔清單_v1」：上市 100、上櫃 50。
-  # 下載頁 HTTPS 尚未提供，不能 --confirm，正式模式仍阻擋。
   official_universe_path: data/universe/universe.csv
-  universe_manifest: null
-  benchmarks_path: null
-  benchmarks_manifest: null
+  universe_manifest: data/universe/universe.manifest.json
+  benchmarks_path: DataPack/benchmarks.csv
+  benchmarks_manifest: DataPack/benchmarks.manifest.json
+  auto_refresh_benchmarks: true
+  # 使用者指定：參考名單原始順序的前十檔，各前十五大持股；不是完整三十檔。
+  benchmark_etf_limit: 10
+  benchmark_max_age_days: 7
   # 2026-09-11 證交所揭露的主動 ETF 代號。沒有前 15 大持股與權重，不能當基準。
   official_etf_list_path: data/reference/active_etfs.csv
   official_etf_list_as_of: '2026-09-11'
-  # 2026-09-29 公告已確認首日；末日不在目前公告，整段賽程不標成已確認。
-  schedule_confirmed: false
+  # 首日依 2026-09-29 公告；末日由使用者確認 11/27。
+  schedule_confirmed: true
   first_trade_date: '2026-10-27'
-  last_trade_date: null
+  last_trade_date: '2026-11-27'
   # 2026-10-05 公告改為前 15 大、低於 15% 才違規。正規化口徑仍是 null。
   active_share_top_n: 15
   active_share_min: 0.15

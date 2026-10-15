@@ -34,11 +34,13 @@ class DataPack:
     source: dict
 
 
-def parse_datapack(raw: dict, pricing_date: date) -> DataPack:
+def parse_datapack(raw: dict, pricing_date: date, *, allow_simulated: bool = False) -> DataPack:
     required = {"schema_version", "doc_type", "team_id", "trade_date", "as_of_date", "generated_at",
                 "missing", "prev_day_orders", "account", "holdings", "compliance"}
     if not isinstance(raw, dict) or required - raw.keys():
         raise PlanError("DataPack 缺少必要頂層欄位")
+    if raw.get("_simulation") and not allow_simulated:
+        raise PlanError("模擬 DataPack 僅限演練，不能匯入正式帳本")
     # 規格書的檔名版本和 JSON 資料版本不同，不能把 3.0 擅改為 4.3。
     if raw["doc_type"] != "DataPack" or raw["schema_version"] != "3.0":
         raise PlanError("不支援的 DataPack doc_type 或 schema_version（目前為 3.0）")
@@ -131,3 +133,14 @@ def parse_datapack(raw: dict, pricing_date: date) -> DataPack:
     if initial and (holdings or receivable_cash or cash != nav or nav != aum or outcome != "none"):
         raise PlanError("DataPack 無結算日期只允許可確認的首次全現金狀態")
     return DataPack(trade_day, book_day, generated, raw["team_id"], cash, positions, nav, aum, initial, copy.deepcopy(raw))
+
+
+def simulated_initial_pack(team_id: str, trade_day: date, generated: datetime, capital: int) -> dict:
+    """只模擬帳戶初始條件，不模擬行情、新聞或模型執行。"""
+    from agent.util import stamp
+    return {"_simulation": True, "schema_version": "3.0", "doc_type": "DataPack", "team_id": team_id,
+            "trade_date": trade_day.isoformat(), "as_of_date": None, "generated_at": stamp(generated),
+            "missing": [], "prev_day_orders": {"outcome": "none", "void_reasons": [], "excluded_codes": []},
+            "account": {"cash": capital, "nav_tradable": capital, "aum": capital,
+                        "receivable_cash": 0, "cash_ratio_tradable": 1, "holdings_count": 0},
+            "holdings": [], "compliance": {"violations": 0, "notices": 0, "incidents": []}}

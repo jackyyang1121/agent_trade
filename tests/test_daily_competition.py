@@ -85,8 +85,8 @@ class DailyCompetitionContractTest(unittest.TestCase):
                                                  "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(),
                                                  "as_of": self.pricing.isoformat(), "etf_ids": ["ETF_TEST"],
                                                  "definition": "top15_normalized"}), encoding="utf-8")
-        # 這組服務契約以現存官方 v4.2 Schema 為替身，不冒稱 v4.3 驗證。
-        self.runtime["competition"].update(required_dplan_schema_version="4.2", official_universe_path=str(universe), universe_manifest=str(universe_manifest),
+        self.runtime["competition"].update(required_dplan_schema_version="4.3", auto_refresh_benchmarks=False,
+                                            benchmark_etf_limit=None, official_universe_path=str(universe), universe_manifest=str(universe_manifest),
                                             benchmarks_path=str(benchmark), benchmarks_manifest=str(benchmark_manifest),
                                             schedule_confirmed=True, first_trade_date="2026-10-27",
                                             last_trade_date="2026-11-30", allow_degraded=False)
@@ -95,7 +95,11 @@ class DailyCompetitionContractTest(unittest.TestCase):
         self.runtime["competition"].update(official_etf_list_path=str(etf_list), official_etf_list_as_of=self.pricing.isoformat())
         self.book = CompetitionBook(self.state / "competition", self.settings["initial_capital"])
         self.before = {"as_of": self.pricing.isoformat(), "cash": "1000000000.00", "positions": {}}
-        self.book.reconcile(self.before, self.pricing)
+        from tests.test_datapack import initial_pack
+        pack = initial_pack()
+        pack.update(team_id=self.settings['team_id'], trade_date=self.day.isoformat(),
+                    as_of_date=self.pricing.isoformat(), generated_at=self.started.isoformat())
+        self.book.reconcile(pack, self.pricing)
 
     def research_adapter_double(self, runtime, state_dir, universe, quant, as_of, sources):
         """Return a recorded-provider-shaped test double, without invoking GPT."""

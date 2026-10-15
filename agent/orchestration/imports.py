@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import math
+import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -33,7 +34,7 @@ def read_benchmarks(path: Path) -> dict[str, dict[str, float]]:
             weight = float(row["weight"])
         except (ValueError, KeyError) as exc:
             raise PlanError("ETF 持股 weight 需為原基金 NAV 權重小數，例如 0.08") from exc
-        if not etf or len(ticker) != 4 or not ticker.isdigit() or not math.isfinite(weight) or not 0 < weight <= 1:
+        if not etf or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,39}", ticker) or not math.isfinite(weight) or not 0 < weight <= 1:
             raise PlanError("無效 ETF 持股列")
         if ticker in result.setdefault(etf, {}):
             raise PlanError("同一 ETF 有重複持股")
@@ -43,10 +44,12 @@ def read_benchmarks(path: Path) -> dict[str, dict[str, float]]:
     return result
 
 
-def import_data(kind: str, path: Path, state_dir: Path, *, source_url: str, as_of: str,
+def import_data(kind: str, path: Path, state_dir: Path, *, source_url: str | None = None, source_note: str | None = None, as_of: str,
                 confirmed: bool = False, definition: str | None = None) -> dict:
-    if urlsplit(source_url).scheme != "https" or not urlsplit(source_url).hostname:
-        raise PlanError("匯入必須記錄真實 HTTPS 官方來源／合法授權來源 URL")
+    if not source_url and kind == "universe" and source_note:
+        pass  # 使用者已核對的本機官方 PDF 不需要虛構下載網址。
+    elif not source_url or urlsplit(source_url).scheme != "https" or not urlsplit(source_url).hostname:
+        raise PlanError("匯入需來源 URL；本機官方股票池可改用 --source-note 記錄核對依據")
     date.fromisoformat(as_of)
     parsed = read_universe(path) if kind == "universe" else read_benchmarks(path)
     if kind == "universe" and (len(parsed) != 150 or sum(r["market"] == "twse" for r in parsed) != 100 or sum(r["market"] == "tpex" for r in parsed) != 50):
@@ -60,7 +63,7 @@ def import_data(kind: str, path: Path, state_dir: Path, *, source_url: str, as_o
     destination.parent.mkdir(parents=True, exist_ok=True)
     if not destination.exists():
         shutil.copyfile(path, destination)
-    manifest = {"source_url": source_url, "confirmed": confirmed, "sha256": digest, "as_of": as_of,
+    manifest = {"source_url": source_url, "source_note": source_note, "confirmed": confirmed, "sha256": digest, "as_of": as_of,
                 "path": str(destination.resolve())}
     if kind == "benchmarks":
         manifest.update(etf_ids=sorted(parsed), definition=definition)

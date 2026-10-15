@@ -5,6 +5,17 @@ data/probe/
 data/preview/
 data/runtime/
 data/experiments/
+runtime/
+DataPack/simulated/
+DataPack/official/
+DataPack/benchmark_updates/
+DataPack/benchmarks.csv
+DataPack/benchmarks.manifest.json
+決策報告繳交紀錄/演練/
+決策報告繳交紀錄/正式/
+決策報告繳交紀錄/影子/
+決策報告繳交紀錄/個人/
+決策報告繳交紀錄/離線測試/
 inbox/
 .env
 .env.*
