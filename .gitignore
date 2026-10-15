@@ -3,3 +3,13 @@ __pycache__/
 data/cache/
 data/probe/
 data/preview/
+data/runtime/
+data/experiments/
+inbox/
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+.venv/

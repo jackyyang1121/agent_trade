@@ -25,7 +25,7 @@ def stamp(dt: datetime) -> str:
         dt = dt.replace(tzinfo=TAIPEI)
     else:
         dt = dt.astimezone(TAIPEI)
-    return dt.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+    return dt.isoformat(timespec="microseconds")
 
 
 def parse_date(text: str) -> date:

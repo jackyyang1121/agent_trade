@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+import math
 
 from agent.util import LOT, PlanError, fit_shares, money, target_shares
 
@@ -21,17 +22,35 @@ class Construction:
     cash_low: float
     cash_high: float
     funding_sells: set[str] = field(default_factory=set)
+    method: str = "heuristic_constrained_allocation_v2"
+    diagnostics: dict = field(default_factory=dict)
 
 
 def cap_of(ticker: str, portfolio: dict) -> float:
-    if ticker == "2330":
-        return float(portfolio["cap_2330"])
-    return float(portfolio["cap_other"])
+    regulatory = 0.25 if ticker == "2330" else 0.10
+    configured = float(portfolio["cap_2330"] if ticker == "2330" else portfolio["cap_other"])
+    decision = float(portfolio.get("_decision_caps", {}).get(ticker, configured))
+    return max(0.0, min(regulatory, configured, decision))
 
 
-def active_share(our_weights: dict[str, float], bench_weights: dict[str, float]) -> float:
-    our_top = dict(sorted(our_weights.items(), key=lambda item: -item[1])[:10])
-    return _active_share_vectors(our_top, bench_weights)
+def active_share(our_weights: dict[str, float], bench_weights: dict[str, float], definition: str = "top10_normalized") -> float:
+    """Explicit calculation convention; official normalization needs confirmation.
+
+    The competition text specifies both top-ten baskets but not their
+    normalization. Callers must confirm the configured definition before formal
+    submission; this default preserves the research/backwards-compatible API.
+    """
+    if any(not math.isfinite(float(v)) or float(v) < 0 for v in list(our_weights.values()) + list(bench_weights.values())):
+        raise PlanError("Active Share 權重必須為非負有限數值")
+    if definition == "full_normalized":
+        return _active_share_vectors(our_weights, bench_weights)
+    our_top = dict(sorted(our_weights.items(), key=lambda item: (-item[1], item[0]))[:10])
+    bench_top = dict(sorted(bench_weights.items(), key=lambda item: (-item[1], item[0]))[:10])
+    if definition == "top10_normalized":
+        return _active_share_vectors(our_top, bench_top)
+    if definition == "top10_raw":
+        return 0.5 * sum(abs(our_top.get(t, 0) - bench_top.get(t, 0)) for t in set(our_top) | set(bench_top))
+    raise PlanError(f"未知 Active Share 定義 {definition}")
 
 
 def _renorm(weights: dict[str, float]) -> dict[str, float]:
@@ -48,13 +67,15 @@ def _active_share_vectors(our: dict[str, float], bench: dict[str, float]) -> flo
     return 0.5 * sum(abs(left.get(key, 0.0) - right.get(key, 0.0)) for key in keys)
 
 
-def worst_active_share(weights: dict[str, float], benchmarks: dict[str, dict[str, float]]) -> tuple[float, str | None]:
+def worst_active_share(weights: dict[str, float], benchmarks: dict[str, dict[str, float]], definition: str = "top10_normalized") -> tuple[float, str | None]:
     if not benchmarks:
         return 1.0, None
     worst = 1.0
     name = None
     for etf_id, bench in benchmarks.items():
-        score = active_share(weights, bench)
+        if not bench:
+            raise PlanError(f"Active Share 基準 {etf_id} 沒有有效持股")
+        score = active_share(weights, bench, definition)
         if score < worst:
             worst = score
             name = etf_id
@@ -68,12 +89,13 @@ def repair_active_share(
     benchmarks: dict[str, dict[str, float]],
     buffer: float,
     cap_fn,
+    definition: str = "top10_normalized",
 ) -> dict[str, float]:
     if not benchmarks:
         return weights
     current = dict(weights)
     for _ in range(12):
-        worst, etf_id = worst_active_share(current, benchmarks)
+        worst, etf_id = worst_active_share(current, benchmarks, definition)
         if worst >= buffer or etf_id is None:
             break
         bench = benchmarks[etf_id]
@@ -138,8 +160,49 @@ def _allocate(selected: list[str], scores: dict[str, float], invested: float, ca
             break
         room = sum(space for _ticker, space in recipients)
         for ticker, space in recipients:
-            weights[ticker] += freed * space / room
+            weights[ticker] += min(freed, room) * space / room
     return weights
+
+
+def _correlation_pairs(selected: list[str], metrics: dict, portfolio: dict) -> list[tuple[str, str]]:
+    """High absolute-correlation pair constraints, not transitive clusters.
+
+    Broad market correlation can connect the entire eligible universe. A single
+    connected-component cap would then conflict with the mandatory investment
+    level. This transparent guardrail limits every observed high-correlation
+    pair and reports that narrower scope explicitly; it does not claim to bound
+    the weight of an entire market-connected component.
+    """
+    if not portfolio.get("max_correlated_weight"):
+        return []
+    threshold = float(portfolio.get("correlation_threshold", 0.85))
+    pairs = []
+    for i, left in enumerate(selected):
+        for right in selected[i + 1:]:
+            value = (metrics.get(left, {}).get("correlations") or {}).get(right)
+            if value is None:
+                value = (metrics.get(right, {}).get("correlations") or {}).get(left)
+            if value is not None and math.isfinite(float(value)) and abs(float(value)) >= threshold:
+                pairs.append((left, right))
+    return pairs
+
+
+def _limit_correlation(weights: dict, pairs: list[tuple[str, str]], limit: float) -> dict:
+    current = dict(weights)
+    # Only trim; later cash-band validation determines whether the constrained
+    # portfolio is feasible. Never silently relax the configured guardrail.
+    for _ in range(20):
+        changed = False
+        for left, right in pairs:
+            total = current.get(left, 0) + current.get(right, 0)
+            if total > limit + 1e-12:
+                scale = limit / total
+                current[left] *= scale
+                current[right] *= scale
+                changed = True
+        if not changed:
+            break
+    return current
 
 
 def judge_regime(market: dict, rules: dict) -> tuple[str, int, str | None]:
@@ -192,7 +255,14 @@ def stance_of(regime: str, intent: str) -> str:
 
 
 def _select_names(scores, metrics, prices, nav, held, portfolio, names_n, industries) -> tuple[list[str], list[str]]:
-    ranked = sorted(scores, key=lambda ticker: (-scores[ticker], ticker))
+    # Hysteresis is measured on the score range, not presented as an expected
+    # stock return. Fees/tax increase the hurdle; a small rank improvement alone
+    # does not evict a holding. Defaults are deliberately labelled heuristic.
+    spread = max(scores.values(), default=0.0) - min(scores.values(), default=0.0)
+    hurdle = max(0.0, float(portfolio.get("min_score_improvement", 0.05)))
+    hurdle += max(0.0, float(portfolio.get("_roundtrip_cost", 0.0)))
+    retention = {t: scores[t] + (max(spread, 1e-6) * hurdle if held.get(t, 0) > 0 else 0.0) for t in scores}
+    ranked = sorted(scores, key=lambda ticker: (-retention[ticker], ticker))
     eligible: list[str] = []
     for ticker in ranked:
         price = prices.get(ticker)
@@ -201,7 +271,7 @@ def _select_names(scores, metrics, prices, nav, held, portfolio, names_n, indust
         turnover = (metrics.get(ticker) or {}).get("avg_turnover")
         if held.get(ticker, 0) <= 0 and (turnover is None or turnover < float(portfolio["min_avg_turnover"])):
             continue
-        if LOT * price / nav > cap_of(ticker, portfolio):
+        if not math.isfinite(price) or LOT * price / nav > cap_of(ticker, portfolio):
             continue
         eligible.append(ticker)
     max_in_sector = max(3, int(names_n * float(portfolio["max_sector_weight"]) + 0.999))
@@ -223,12 +293,12 @@ def _select_names(scores, metrics, prices, nav, held, portfolio, names_n, indust
         selected.append(ticker)
     rank = {ticker: index for index, ticker in enumerate(eligible)}
     for ticker, shares in held.items():
-        if shares <= 0 or ticker in selected or ticker not in prices:
+        if shares <= 0 or ticker in selected or ticker not in prices or ticker not in eligible:
             continue
         if rank.get(ticker, 10**9) <= int(portfolio["keep_rank"]):
             if len(selected) >= names_n and selected:
-                worst = min(selected, key=lambda item: (scores.get(item, -1e9), item))
-                if scores.get(ticker, -1e9) >= scores.get(worst, -1e9):
+                worst = min(selected, key=lambda item: (retention.get(item, -1e9), item))
+                if retention.get(ticker, -1e9) >= retention.get(worst, -1e9):
                     selected.remove(worst)
                     selected.append(ticker)
             elif len(selected) < int(portfolio["max_names"]):
@@ -247,7 +317,11 @@ def _share_plan(weights, held, prices, nav, portfolio, band: float) -> dict[str,
         price = prices[ticker]
         ideal = target_shares(weight, nav, price, LOT)
         old = int(held.get(ticker, 0))
-        cap_shares, _cap_weight = fit_shares(target_shares(cap_of(ticker, portfolio), nav, price, LOT), nav, price, cap_of(ticker, portfolio), LOT)
+        # Reserve the maximum possible same-price cost erosion before applying
+        # post-trade-NAV caps, including small scenario-based position limits.
+        planning_limit = cap_of(ticker, portfolio) * (1 - portfolio.get("_roundtrip_cost", 0.0))
+        cap_shares, _cap_weight = fit_shares(target_shares(planning_limit, nav, price, LOT), nav, price, planning_limit, LOT)
+        ideal = min(ideal, cap_shares)
         if old > cap_shares:
             targets[ticker] = cap_shares
             continue
@@ -288,6 +362,8 @@ def _limit_orders(share_targets, held, prices, nav, portfolio) -> dict[str, int]
         orders.sort(key=lambda row: notion(row[0], row[1], row[2]))
         reverted = False
         for ticker, target, old, _side in orders:
+            if ticker in portfolio.get("_force_exits", set()):
+                continue
             if old > target:
                 weight = old * prices[ticker] / nav
                 if weight > cap_of(ticker, portfolio) + 1e-9:
@@ -310,15 +386,27 @@ def _limit_orders(share_targets, held, prices, nav, portfolio) -> dict[str, int]
     return current
 
 
-def estimate(cash: Decimal, positions: dict[str, int], orders: list[dict], prices: dict[str, float], commission: Decimal, tax: Decimal):
+def estimate(cash: Decimal, positions: dict[str, int], orders: list[dict], prices: dict[str, float], commission: Decimal, tax: Decimal, *, allow_negative_cash: bool = False):
     cash_now = Decimal(cash)
+    if not cash_now.is_finite() or cash_now < 0 or commission < 0 or tax < 0:
+        raise PlanError("現金與交易費率必須為非負有限數值")
+    if any(int(shares) != shares or int(shares) < 0 for shares in positions.values()):
+        raise PlanError("庫存不得為負或非整數")
     book = {ticker: int(shares) for ticker, shares in positions.items() if int(shares) > 0}
     buy_notional = Decimal("0")
     sell_notional = Decimal("0")
+    traded: set[str] = set()
     for order in orders:
         ticker = order["ticker"]
         shares = int(order["shares"])
+        if ticker in traded:
+            raise PlanError(f"{ticker} 重複委託或當沖，不支援")
+        traded.add(ticker)
+        if shares != order["shares"] or shares <= 0 or shares % LOT or order["side"] not in {"BUY", "SELL"}:
+            raise PlanError("委託必須為有效買賣方向與正整張股數")
         price = Decimal(str(prices[ticker]))
+        if not price.is_finite() or price <= 0:
+            raise PlanError(f"{ticker} 缺少有效定價")
         notional = price * shares
         fee = money(notional * commission)
         if order["side"] == "BUY":
@@ -335,6 +423,8 @@ def estimate(cash: Decimal, positions: dict[str, int], orders: list[dict], price
             if book[ticker] == 0:
                 book.pop(ticker)
     nav = cash_now
+    if cash_now < 0 and not allow_negative_cash:
+        raise PlanError("交易成本計入後現金為負，禁止融資")
     for ticker, shares in book.items():
         nav += Decimal(shares) * Decimal(str(prices[ticker]))
     return money(cash_now), money(nav), book, buy_notional, sell_notional
@@ -392,12 +482,19 @@ def declared_weights(share_targets, held, prices, nav, portfolio) -> dict[str, f
 
 def pretrade_nav(cash: Decimal, positions: dict[str, int], prices: dict[str, float]) -> Decimal:
     nav = Decimal(cash)
+    if not nav.is_finite() or nav < 0:
+        raise PlanError("現金無效或為負")
     for ticker, shares in positions.items():
+        if int(shares) != shares or int(shares) < 0:
+            raise PlanError(f"持股 {ticker} 不是非負整數")
         if int(shares) <= 0:
             continue
         if ticker not in prices:
             raise PlanError(f"持股 {ticker} 沒有定價日收盤價，無法下單")
-        nav += Decimal(int(shares)) * Decimal(str(prices[ticker]))
+        price = Decimal(str(prices[ticker]))
+        if not price.is_finite() or price <= 0:
+            raise PlanError(f"持股 {ticker} 沒有有效定價")
+        nav += Decimal(int(shares)) * price
     return money(nav)
 
 
@@ -413,7 +510,40 @@ def construct(
     regime: str,
     commission: float,
     tax: float,
+    decisions: dict[str, dict] | None = None,
 ) -> Construction:
+    # Copy configuration: daily decisions must never leak caps into another
+    # shadow variant, or mutate caller-owned configuration.
+    portfolio = dict(portfolio)
+    if "min_score_improvement" not in portfolio and "rebalance_score_margin" in portfolio:
+        portfolio["min_score_improvement"] = portfolio["rebalance_score_margin"]
+    for ticker, shares in held.items():
+        if shares > 0 and metrics.get(ticker, {}).get("tradable") is False:
+            raise PlanError(f"持股 {ticker} 停牌、無成交或行情過期，無法安全產生交易組合")
+    definition = portfolio.get("active_share_definition", "top10_normalized")
+    if portfolio.get("require_benchmarks") and not benchmarks:
+        raise PlanError("正式模式缺少 Active Share 基準，禁止產生可提交組合")
+    if portfolio.get("require_benchmarks") and not portfolio.get("active_share_definition_confirmed"):
+        raise PlanError("Active Share 計算定義尚未確認")
+    if benchmarks:
+        worst_active_share({}, benchmarks, definition)
+    decisions = decisions or {ticker: row["decision"] for ticker, row in metrics.items() if row.get("decision")}
+    portfolio["_decision_caps"] = {ticker: float(row["max_weight"]) for ticker, row in decisions.items() if row.get("max_weight") is not None}
+    portfolio["_force_exits"] = {ticker for ticker, row in decisions.items() if not row.get("eligible", False)}
+    portfolio["_roundtrip_cost"] = 2 * max(0.0, commission) + max(0.0, tax)
+    scores = {ticker: float(value) for ticker, value in scores.items()
+              if math.isfinite(float(value)) and (not decisions.get(ticker) or decisions[ticker].get("eligible", False))}
+    # A transparent risk haircut controls correlation and unusually high daily
+    # volatility; independent raw signals remain unchanged in the archive.
+    risk_scores = {}
+    for ticker, score in scores.items():
+        metric = metrics.get(ticker, {})
+        vol = metric.get("volatility_20", metric.get("vol_20"))
+        corr = metric.get("mean_correlation")
+        vol_penalty = max(0.0, float(vol) / float(portfolio.get("volatility_reference", 0.03)) - 1) if vol is not None and math.isfinite(float(vol)) else 0.0
+        corr_penalty = max(0.0, float(corr) - float(portfolio.get("correlation_reference", 0.70))) if corr is not None and math.isfinite(float(corr)) else 0.0
+        risk_scores[ticker] = score / (1 + float(portfolio.get("risk_haircut", 0.25)) * (vol_penalty + corr_penalty)) if score > 0 else score
+    scores = risk_scores
     nav_dec = pretrade_nav(cash, held, prices)
     nav = float(nav_dec)
     if nav <= 0:
@@ -435,7 +565,7 @@ def construct(
             invested,
             lambda ticker: cap_of(ticker, portfolio),
             industries,
-            float(portfolio["max_sector_weight"]),
+            float(portfolio["max_sector_weight"]) * (1 - portfolio["_roundtrip_cost"]),
         )
         weights = repair_active_share(
             weights,
@@ -444,7 +574,11 @@ def construct(
             benchmarks,
             float(portfolio["active_share_buffer"]),
             lambda ticker: cap_of(ticker, portfolio),
+            definition,
         )
+        pairs = _correlation_pairs(list(weights), metrics, portfolio)
+        if pairs:
+            weights = _limit_correlation(weights, pairs, float(portfolio["max_correlated_weight"]) * (1 - portfolio["_roundtrip_cost"]))
         share_targets = _share_plan(weights, held, prices, nav, portfolio, band)
         share_targets = _limit_orders(share_targets, held, prices, nav, portfolio)
         declared = declared_weights(share_targets, held, prices, nav, portfolio)
@@ -465,24 +599,34 @@ def construct(
                 }
             )
         cash_after, nav_after, positions_after, buy_notional, sell_notional = estimate(
-            cash, held, orders, prices, commission_d, tax_d
+            cash, held, orders, prices, commission_d, tax_d, allow_negative_cash=True
         )
         count = sum(1 for shares in positions_after.values() if shares > 0)
         cash_pct = float(cash_after / nav_after) if nav_after > 0 else -1
         overweight = []
         for ticker, shares in positions_after.items():
-            weight = shares * prices[ticker] / nav
-            limit = 0.25 if ticker == "2330" else 0.10
+            weight = shares * prices[ticker] / float(nav_after)
+            limit = cap_of(ticker, portfolio)
             if weight > limit + 1e-8:
                 overweight.append(ticker)
         as_worst, as_name = worst_active_share(
-            {ticker: shares * prices[ticker] / nav for ticker, shares in positions_after.items()},
+            {ticker: shares * prices[ticker] / float(nav_after) for ticker, shares in positions_after.items()},
             benchmarks,
+            definition,
         )
-        cash_ok = 0.02 <= cash_pct <= 0.20 and cash_after > 0
+        sector_weights: dict[str, float] = {}
+        for ticker, shares in positions_after.items():
+            sector = industries.get(ticker, "NA")
+            sector_weights[sector] = sector_weights.get(sector, 0) + shares * prices[ticker] / float(nav_after)
+        sector_ok = all(weight <= float(portfolio["max_sector_weight"]) + 1e-8 for weight in sector_weights.values())
+        actual_weights = {ticker: shares * prices[ticker] / float(nav_after) for ticker, shares in positions_after.items()}
+        actual_pairs = _correlation_pairs(list(actual_weights), metrics, portfolio)
+        correlation_ok = all(actual_weights[a] + actual_weights[b] <= float(portfolio["max_correlated_weight"]) + 1e-8
+                             for a, b in actual_pairs)
+        cash_ok = max(0.0, float(portfolio.get("cash_min", 0.02))) <= cash_pct <= min(0.25, float(portfolio.get("cash_max", 0.20))) and cash_pct < 0.25 and cash_after > 0
         count_ok = int(portfolio["min_names"]) <= count <= int(portfolio["max_names"])
         as_ok = (not benchmarks) or as_worst + 1e-9 >= float(portfolio["active_share_min"])
-        if cash_ok and count_ok and not overweight and as_ok and len(orders) <= int(portfolio["max_orders"]):
+        if cash_ok and count_ok and not overweight and sector_ok and correlation_ok and as_ok and len(orders) <= int(portfolio["max_orders"]):
             intent = _intent(buy_notional, sell_notional, nav)
             low, high = _cash_band(cash_pct)
             funding: set[str] = set()
@@ -490,7 +634,7 @@ def construct(
             buys = [order for order in orders if order["side"] == "BUY"]
             if sells and buys:
                 buy_only = [order for order in orders if order["side"] == "BUY"]
-                cash_wo, nav_wo, _pos, _b, _s = estimate(cash, held, buy_only, prices, commission_d, tax_d)
+                cash_wo, nav_wo, _pos, _b, _s = estimate(cash, held, buy_only, prices, commission_d, tax_d, allow_negative_cash=True)
                 pct_wo = float(cash_wo / nav_wo) if nav_wo > 0 else -1
                 if pct_wo < low - 1e-9:
                     funding = {order["ticker"] for order in sells}
@@ -508,6 +652,12 @@ def construct(
                 cash_low=low,
                 cash_high=high,
                 funding_sells=funding,
+                diagnostics={"active_share_definition": definition, "active_share_definition_confirmed": bool(portfolio.get("active_share_definition_confirmed")),
+                             "active_share_verified": bool(benchmarks), "sector_weights": sector_weights,
+                             "roundtrip_cost": portfolio["_roundtrip_cost"], "hysteresis": portfolio.get("min_score_improvement", 0.05),
+                             "correlation_constraint_scope": "pairwise_not_full_connected_component",
+                             "correlated_pairs_checked": len(actual_pairs),
+                             "defaults": "heuristic_not_calibrated_expected_returns"},
             )
         bits = []
         if not cash_ok:
@@ -516,6 +666,10 @@ def construct(
             bits.append(f"持股 {count} 檔")
         if overweight:
             bits.append("權重超限 " + ",".join(overweight))
+        if not sector_ok:
+            bits.append("產業權重超限")
+        if not correlation_ok:
+            bits.append("高相關成對持股權重超限")
         if not as_ok:
             bits.append(f"Active Share {as_worst:.2%} 相對 {as_name}")
         last_problem = "、".join(bits) or last_problem

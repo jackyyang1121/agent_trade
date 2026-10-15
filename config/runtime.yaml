@@ -1,0 +1,36 @@
+# 初始規則為可解釋的 heuristic defaults，尚非經績效校準的最佳參數。
+state_dir: data/runtime
+llm:
+  provider: codex_cli
+  model: null
+  timeout_seconds: 120
+  max_retries: 1
+  allow_live: false
+research:
+  max_rounds: 3
+  max_model_calls: 3
+  max_sources: 20
+  max_seconds: 240
+  max_tasks: 10
+  allow_network: false
+  allowed_domains: []
+  source_roots: [inbox/research]
+  sources: []
+signals:
+  quant_ranking: legacy_baseline
+  research_weight_policy: evidence_gated
+  exploratory_cap: 0.02
+  max_correlated_weight: 0.25
+  min_score_improvement: 0.15
+competition:
+  official_universe_path: null
+  universe_manifest: null
+  benchmarks_path: null
+  benchmarks_manifest: null
+  schedule_confirmed: false
+  first_trade_date: '2026-10-27'
+  last_trade_date: null
+  allow_degraded: false
+forward:
+  variants: [Q0, H1, H2]
+  prediction_horizons: [1, 5, 10, 20]

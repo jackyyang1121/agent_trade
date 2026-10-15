@@ -1,18 +1,34 @@
 ---
-description: 使用者要求產生當日決策報告書時，執行交易系統並回報檔案位置
+description: 執行雙引擎每日研究、Shadow 或明確指定的正式競賽 D-Plan
 alwaysApply: true
 ---
 
-# 每日決策報告書
+# 每日研究與決策報告
 
-使用者說「請生成今天的決策報告書」或同義要求時，在專案根目錄執行：
+先讀根目錄 `AGENTS.md` 與 `docs/DAILY_WORKFLOW.md`。於現有 checkout 執行，先確認 `git status`，不得覆蓋使用者修改。`py` 必須指向已安裝 requirements 的 Python，可改用 `.venv\Scripts\python.exe`。
 
-```bash
-py -m agent run
+使用者未明示正式競賽時，採 Shadow；清楚區分真實研究與離線展示：
+
+```powershell
+py -m agent status
+py scripts/create_demo_fixture.py --output data/runtime/demo_market.json
+py -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json
 ```
 
-- 不要手改 JSON。沒通過檢查就修程式後重跑。
-- 決策書一律寫入 `決策報告繳交紀錄/`，記帳在 `淨值紀錄/`。`team_id` 還沒填時檔名會是 `D-Plan_TEAM_PREVIEW_日期.json`，並提醒先補隊伍代號再上傳。
-- 回覆要給交易日、定價日、委託筆數、預估現金比、兩個檔案的完整路徑。
-- 提醒使用者仍須自己把 D-Plan 上傳到競賽系統，收件到該交易日 08:55。
-- 若程式要求 `config/settings.yaml` 的 team_id、`config/universe.csv` 或 `config/benchmarks.csv`，先說明去哪裡拿，不要用猜的代號。
+Mock 是工程驗證，不能回報為真實 GPT 投資研究。使用者已授權真實 Codex 研究時，確認 CLI 登入、來源及用量預算後使用 `--provider codex_cli --live`；不能自行遞迴啟動多層 Codex。`--model` 可覆寫設定，不硬編碼模型名稱。
+
+明示正式競賽時執行：
+
+```powershell
+py -m agent daily --mode competition --provider codex_cli --live
+```
+
+- 先核對隊伍代號、官方固定 150 檔名單、完整 Active Share 基準、官方庫存／現金、前日定價及已確認賽程。缺少必要條件時保持正式模式阻擋，不猜測、不改檢查來放行。
+- 不手改 JSON、目標權重、交易股數或證據理由。來源失敗標記 unavailable，研究失敗如實記錄，不用假來源或假 Metadata 補齊。
+- 產出不等於已提交或成交。程式不自動上傳競賽網站；只有取得真實收件憑證才可 `mark-submitted`，後續以官方結算 `import-book` 對帳。
+- 回報實際交易日、定價日、Run ID、模式、provider／模型狀態、委託筆數、預估現金比、驗證結果與實際檔案路徑；說明降級、缺資料或阻擋原因。
+- 官方 D-Plan 保持 v4.2 Schema，不加內部研究欄位；研究 Markdown、訊號與版本在獨立狀態中保留。
+- 正式上傳須由使用者執行，依已確認收件窗於交易日上午 08:55 前完成；每日 25 次是提交次數限制，非委託筆數。
+- 研究與 Shadow 結果以 `knowledge`、`evaluate` 查詢。不得把未到期預測或模擬 NAV 宣稱為實際競賽績效。
+- Mock／fixture 研究在 `research_mock.sqlite3`，使用 `knowledge --synthetic` 查詢，不得流入正式 `research.sqlite3`。來源版本一路鎖定至 D-Plan，保留原文與每個 variant checkpoint。
+- `--live` 不解除研究來源的 `allowed_domains`，預設空清單拒絕擷取；配置合法可信網域後才可下載。Codex 未回報實際模型時如實記錄未知，正式模式保持阻擋，不能以請求模型填補。

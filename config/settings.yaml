@@ -1,9 +1,7 @@
 # 主辦方配發的隊伍代號。填好之後，決策書才會寫進「決策報告繳交紀錄」。
 team_id: ""
 
-# 每日執行這份程式的模型（D-Plan agent_metadata，自報用）
-model_provider: xai
-model_version: grok-4.7
+# 模型設定見 runtime.yaml 的 llm；D-Plan metadata 由真實執行紀錄產生。
 
 # 初始虛擬本金（新台幣）
 initial_capital: 1000000000
