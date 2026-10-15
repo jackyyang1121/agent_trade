@@ -1,51 +1,51 @@
 {
-  "_NOTE": "正例範例檔。市場數據為合理推估非真實行情，僅供 schema 驗證與證據鏈展示。範例僅節錄 2 筆異動決策與 2 筆不交易決策；正式提交時每檔續抱持股皆須有 no_trade_decisions 條目。約束（現金、檔數、權重）由 server 以官方資料純重算，無申報欄位。",
-  "schema_version": "4.2",
+  "_NOTE": "正例範例檔。市場數據為推估值，非真實行情。",
+  "schema_version": "4.3",
   "doc_type": "D-Plan",
   "team_id": "TEAM_042",
-  "trade_date": "2026-10-27",
+  "trade_date": "2026-10-28",
   "sources": [
     {
       "source_id": "S1",
       "authority": "twse",
       "name": "TWSE 盤後資訊：上市個股日收盤價量 + 三大法人買賣超（參賽者自抓官方 OpenAPI）",
       "url": "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
-      "content_as_of": "2026-10-26T18:30:00+08:00",
-      "fetched_at": "2026-10-27T05:04:12+08:00"
+      "content_as_of": "2026-10-27T18:30:00+08:00",
+      "fetched_at": "2026-10-28T05:04:12+08:00"
     },
     {
       "source_id": "S2",
       "authority": "vendor",
-      "name": "美股收盤行情（SOX / NDX / SPX，2026-10-26 美東收盤）",
-      "url": "https://finance.example.com/us-close/2026-10-26",
-      "content_as_of": "2026-10-27T04:00:00+08:00",
-      "fetched_at": "2026-10-27T05:08:33+08:00"
+      "name": "美股收盤行情（SOX / NDX / SPX，2026-10-27 美東收盤）",
+      "url": "https://finance.example.com/us-close/2026-10-27",
+      "content_as_of": "2026-10-28T04:00:00+08:00",
+      "fetched_at": "2026-10-28T05:08:33+08:00"
     },
     {
       "source_id": "S3",
       "authority": "taifex",
       "name": "台指期夜盤收盤（TAIFEX 盤後行情表）",
       "url": "https://www.taifex.com.tw/cht/3/futDailyMarketReport",
-      "content_as_of": "2026-10-27T05:00:00+08:00",
-      "fetched_at": "2026-10-27T05:11:47+08:00"
+      "content_as_of": "2026-10-28T05:00:00+08:00",
+      "fetched_at": "2026-10-28T05:11:47+08:00"
     },
     {
       "source_id": "S4",
       "authority": "vendor",
-      "name": "台股 ADR 收盤（TSM / UMC，2026-10-26 美東收盤）",
-      "url": "https://finance.example.com/adr/2026-10-26",
-      "content_as_of": "2026-10-27T04:00:00+08:00",
-      "fetched_at": "2026-10-27T05:09:02+08:00"
+      "name": "台股 ADR 收盤（TSM / UMC，2026-10-27 美東收盤）",
+      "url": "https://finance.example.com/adr/2026-10-27",
+      "content_as_of": "2026-10-28T04:00:00+08:00",
+      "fetched_at": "2026-10-28T05:09:02+08:00"
     },
     {
       "source_id": "S5",
       "authority": "media",
       "name": "Reuters:〈Fed officials signal further easing path at October meeting〉",
-      "url": "https://www.reuters.com/markets/us/fed-october-easing-2026-10-26/",
-      "archive_url": "https://web.archive.org/web/20261027060230/https://www.reuters.com/markets/us/fed-october-easing-2026-10-26/",
-      "published_at": "2026-10-27T03:41:00+08:00",
-      "content_as_of": "2026-10-27T03:41:00+08:00",
-      "fetched_at": "2026-10-27T06:02:19+08:00"
+      "url": "https://www.reuters.com/markets/us/fed-october-easing-2026-10-27/",
+      "archive_url": "https://web.archive.org/web/20261027060230/https://www.reuters.com/markets/us/fed-october-easing-2026-10-27/",
+      "published_at": "2026-10-28T03:41:00+08:00",
+      "content_as_of": "2026-10-28T03:41:00+08:00",
+      "fetched_at": "2026-10-28T06:02:19+08:00"
     }
   ],
   "observations": [
@@ -228,8 +228,8 @@
   "agent_metadata": {
     "model_provider": "anthropic",
     "model_version": "claude-opus-4-7",
-    "run_started_at": "2026-10-27T05:02:10+08:00",
-    "run_completed_at": "2026-10-27T07:52:36+08:00",
+    "run_started_at": "2026-10-28T05:02:10+08:00",
+    "run_completed_at": "2026-10-28T07:52:36+08:00",
     "input_tokens": 48200,
     "output_tokens": 10900,
     "tool_use_count": 14,
