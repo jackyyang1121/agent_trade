@@ -26,6 +26,8 @@ signals:
   max_correlated_weight: 0.25
   min_score_improvement: 0.15
 competition:
+  # 需取得官方原檔置於根目錄 D-Plan.schema_v4.3.json；缺少時正式模式停止。
+  required_dplan_schema_version: '4.3'
   # 已對過本機 PDF「玉山挑戰賽_投資組合及交易標的_150檔清單_v1」：上市 100、上櫃 50。
   # 下載頁 HTTPS 尚未提供，不能 --confirm，正式模式仍阻擋。
   official_universe_path: data/universe/universe.csv

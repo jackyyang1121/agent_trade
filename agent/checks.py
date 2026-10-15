@@ -328,6 +328,8 @@ def semantic_errors(doc: dict, ctx: dict | None = None) -> tuple[list[str], list
             our[ticker] = shares * prices[ticker] / float(nav_after)
     benchmarks = ctx.get("benchmarks") or {}
     definition = str(ctx.get("active_share_definition") or "top15_normalized")
+    if competition and definition not in {"top15_normalized", "top15_raw"}:
+        errors.append("正式競賽 Active Share 必須使用前 15 大持股的已確認定義")
     try:
         basket = active_share_basket_size(definition) or 15
     except PlanError:
@@ -341,7 +343,15 @@ def semantic_errors(doc: dict, ctx: dict | None = None) -> tuple[list[str], list
         expected = set(ctx.get("benchmark_etf_ids") or [])
         if expected and expected != set(benchmarks):
             errors.append("Active Share 基準名單與已確認完整清單不一致")
-        minimum = float(ctx.get("active_share_min", 0.15))
+        try:
+            minimum = float(ctx.get("active_share_min", 0.15))
+            if isinstance(ctx.get("active_share_min"), bool) or not math.isfinite(minimum) or not 0 <= minimum <= 1:
+                raise ValueError("門檻必須是 0 到 1 的有限比率")
+            if competition and minimum < 0.15:
+                errors.append("正式競賽 Active Share 門檻不得低於 15%")
+        except (TypeError, ValueError):
+            errors.append("Active Share 門檻必須是 0 到 1 的有限比率")
+            return errors, warnings
         for etf_id, bench in benchmarks.items():
             try:
                 valid_weights = isinstance(bench, dict) and len(bench) == basket and all(math.isfinite(float(value)) and float(value) > 0 for value in bench.values())

@@ -406,9 +406,9 @@ def build_provider(config: dict | None = None) -> Provider:
     provider = config.pop("provider", "codex_cli")
     if provider == "mock":
         return MockProvider(config.get("responses"))
-    allowed = {"model", "timeout_seconds", "max_retries", "allow_live", "reasoning_effort"}
+    allowed = {"model", "timeout_seconds", "max_retries", "allow_live"}
     if provider == "codex_cli":
-        allowed.update({"executable", "max_output_bytes"})
+        allowed.update({"executable", "max_output_bytes", "reasoning_effort"})
         return CodexCLIProvider(**{key: value for key, value in config.items() if key in allowed})
     if provider == "openai_api":
         allowed.add("api_key_env")

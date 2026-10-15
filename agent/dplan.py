@@ -4,6 +4,7 @@ import math
 from datetime import datetime
 
 from agent.portfolio import Construction, stance_of
+from agent.config import active_schema_version
 from agent.util import jnum, stamp
 
 
@@ -341,7 +342,7 @@ def render_dplan(
     else:
         counter_text = None
     document = {
-        "schema_version": "4.2",
+        "schema_version": active_schema_version(),
         "doc_type": "D-Plan",
         "team_id": team_id,
         "trade_date": trade_date,

@@ -85,10 +85,14 @@ class DailyCompetitionContractTest(unittest.TestCase):
                                                  "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(),
                                                  "as_of": self.pricing.isoformat(), "etf_ids": ["ETF_TEST"],
                                                  "definition": "top15_normalized"}), encoding="utf-8")
-        self.runtime["competition"].update(official_universe_path=str(universe), universe_manifest=str(universe_manifest),
+        # 這組服務契約以現存官方 v4.2 Schema 為替身，不冒稱 v4.3 驗證。
+        self.runtime["competition"].update(required_dplan_schema_version="4.2", official_universe_path=str(universe), universe_manifest=str(universe_manifest),
                                             benchmarks_path=str(benchmark), benchmarks_manifest=str(benchmark_manifest),
                                             schedule_confirmed=True, first_trade_date="2026-10-27",
                                             last_trade_date="2026-11-30", allow_degraded=False)
+        etf_list = self.root / "official-etfs-test-double.csv"
+        etf_list.write_text("ticker,name,market\nETF_TEST,Unit test ETF,twse\n", encoding="utf-8")
+        self.runtime["competition"].update(official_etf_list_path=str(etf_list), official_etf_list_as_of=self.pricing.isoformat())
         self.book = CompetitionBook(self.state / "competition", self.settings["initial_capital"])
         self.before = {"as_of": self.pricing.isoformat(), "cash": "1000000000.00", "positions": {}}
         self.book.reconcile(self.before, self.pricing)
@@ -187,6 +191,49 @@ class DailyCompetitionContractTest(unittest.TestCase):
         self.assertEqual(repeated["run_id"], summary["run_id"])
         self.assertEqual(research.call_count, 1)
         self.assertEqual(self.book.get_ledger().cash, Decimal(self.before["cash"]))
+
+    def test_temporary_research_failure_can_retry_without_changing_strategy(self):
+        research = self.injected_services()
+        failure = {"metadata": {"provider": "codex_cli", "model": None, "success": False,
+                                "new_research": False, "used_llm": False, "synthetic": False,
+                                "completed_at": self.completed.isoformat()},
+                   "theses": [], "sources": [], "tasks": [], "limitations": ["temporary test authentication failure"]}
+        research.side_effect = lambda *_args, **_kwargs: failure
+        with self.assertRaisesRegex(PlanError, "真實研究失敗"):
+            workflow.daily(mode="competition", trade_date=self.day, state_dir=self.state, live=True)
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(list(self.state.rglob("research.json")), [])
+        self.assertEqual(self.book.get_ledger().positions, {})
+        with sqlite3.connect(self.book.path) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM plans").fetchone()[0], 0)
+        research.side_effect = self.research_adapter_double
+        summary = workflow.daily(mode="competition", trade_date=self.day, state_dir=self.state, live=True)
+        self.assertEqual(research.call_count, 2)
+        self.assertEqual(summary["portfolios"]["H2"]["status"], "VALIDATED")
+        self.assertEqual(summary["strategy_version"], self.version)
+        repeated = workflow.daily(mode="competition", trade_date=self.day, state_dir=self.state, live=True)
+        self.assertTrue(repeated["reused"])
+        self.assertEqual(research.call_count, 2)
+
+    def test_datapack_discrepant_quotes_cannot_change_official_nav(self):
+        from tests.test_datapack import initial_pack
+        self.state = self.root / "datapack-state"
+        self.book = CompetitionBook(self.state / "competition", self.settings["initial_capital"])
+        raw = initial_pack()
+        raw.update(team_id=self.settings["team_id"], trade_date=self.day.isoformat(),
+                   as_of_date=self.pricing.isoformat(), generated_at=self.started.isoformat())
+        # 測試替身刻意使官方估值與行情轉接器不一致，不能用另一個 NAV 下單。
+        ticker = self.snapshot.universe[0]["ticker"]
+        raw["account"].update(cash=999900000, holdings_count=1, cash_ratio_tradable=0.9999)
+        raw["holdings"] = [{"code": ticker, "shares": 1000, "receivable_shares": 0,
+                            "close_price": 100, "tradable_weight": 0.0001}]
+        self.book.reconcile(raw, self.pricing)
+        self.injected_services()
+        with patch.object(workflow, "construct", side_effect=AssertionError("不得用錯誤 NAV 建構部位")):
+            with self.assertRaisesRegex(PlanError, "nav_tradable 不一致"):
+                workflow.daily(mode="competition", trade_date=self.day, state_dir=self.state, live=True)
+        self.assertEqual(self.book.get_ledger().cash, Decimal(999900000))
+        self.assertEqual(self.book.get_ledger().positions, {ticker: 1000})
 
     def test_computation_crossing_deadline_does_not_validate_official_plan(self):
         deadline_before = datetime(2026, 10, 28, 8, 54, 59, 500000, tzinfo=TAIPEI)

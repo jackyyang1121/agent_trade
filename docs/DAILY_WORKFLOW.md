@@ -73,13 +73,17 @@ read -r -p "官方股票池凍結日 YYYY-MM-DD: " UniverseDate
 read -r -p "完整主動 ETF 持股的 HTTPS 來源 URL: " BenchmarkUrl
 read -r -p "基準資料日期 YYYY-MM-DD: " BenchmarkDate
 read -r -p "官方庫存對應的前交易日 YYYY-MM-DD: " PricingDate
-read -r -p "主辦方確認的定義 top10_normalized 或 top10_raw 或 full_normalized: " ActiveShareDefinition
+read -r -p "主辦方確認的定義 top15_normalized 或 top15_raw: " ActiveShareDefinition
 python -m agent import-universe "C:/data/official_universe.csv" --source-url "$UniverseUrl" --as-of "$UniverseDate" --confirm
 python -m agent import-benchmarks "C:/data/active_etfs.csv" --source-url "$BenchmarkUrl" --as-of "$BenchmarkDate" --definition "$ActiveShareDefinition" --confirm
-python -m agent import-book "C:/data/official_book.json" --pricing-date "$PricingDate"
+python -m agent import-book "C:/data/DataPack.json" --pricing-date "$PricingDate"
 ```
 
 匯入會回傳 `path` 與 `manifest`。目前不會自動改寫 `config/runtime.yaml`；將股票池輸出的路徑填入 `competition.official_universe_path`、`competition.universe_manifest`，基準輸出填入 `competition.benchmarks_path`、`competition.benchmarks_manifest`。在已核對賽程後設定 `schedule_confirmed: true`、真實 `first_trade_date` 與 `last_trade_date`；需要不同環境設定可用 `--config C:/data/runtime.yaml`，不必改 Python。
+
+`import-book` 可直接匯入後台下載的官方 DataPack，亦保留原 `as_of/cash/positions` 帳本相容性。v4.3 規格書中的 DataPack JSON 版本仍是 `3.0`。`--pricing-date` 是必要定價日，不是資料包產生日期；匯入器核對 `as_of_date`，正式流程另核對隊伍及 `trade_date`。首日全現金且 `as_of_date: null` 是有效資料，不會捏造結算日期。`prev_settlement`、`prev_close` 或未知部位會阻擋並保留原帳本。應收配息／配股保留供核對，不能當作可動用現金或可賣股數；`nav_tradable` 與 `aum` 分開處理，行情估值不符官方 NAV 時禁止計算委託。若官方可交易庫存含非整張，現有下單公式仍停止處理，不會截斷股數。
+
+正式 D-Plan 要求 v4.3。取得**官方原始 JSON Schema**後，放在根目錄 `D-Plan.schema_v4.3.json`，重新啟動 CLI；輸出、驗證與程式版本雜湊會使用該檔。缺少時僅保留 v4.2 離線相容驗證，正式模式停止；不要修改舊 Schema 的版本字串或降低 `required_dplan_schema_version` 來繞過。加入官方原檔後仍需用官方範例驗證欄位與限制，不能把目前離線測試當作已完成 v4.3 上線驗證。`status` 會顯示實際與要求的 Schema 版本。
 
 ```bash
 python -m agent status
@@ -87,6 +91,8 @@ python -m agent daily --mode competition --provider codex_cli --live
 ```
 
 資料匯入格式見 [資料來源](DATA_SOURCES.md)。`--confirm` 僅記錄資料核對，不會向主辦方遠端驗證。缺 Active Share 基準、官方確認或帳本時，正式模式採 Fail Closed。Repository 文件對競賽首日提及 10/26，既有設定因休市處理使用 10/27；必須以主辦方賽程與交易所日曆核對後配置，不能只根據本機日期猜測。
+
+正式 v4.3 必須使用後台 DataPack。原 `as_of/cash/positions` 格式僅保留舊版相容與內部測試用途，不能代替新協議下的官方資料包。
 
 ## 5. 驗證、人工上傳與確認
 

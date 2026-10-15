@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 
 import yaml
@@ -10,7 +11,9 @@ from agent.util import ROOT, PlanError
 SETTINGS_PATH = ROOT / "config" / "settings.yaml"
 STRATEGY_PATH = ROOT / "config" / "strategy.yaml"
 PROSPECTUS_PATH = ROOT / "ETF投資策略說明文檔.md"
-SCHEMA_PATH = ROOT / "(驗證繳交格式)D-Plan.schema_v4.2.json"
+SCHEMA_PATH = ROOT / "D-Plan.schema_v4.3.json"
+if not SCHEMA_PATH.is_file():
+    SCHEMA_PATH = ROOT / "(驗證繳交格式)D-Plan.schema_v4.2.json"
 BENCHMARK_PATH = ROOT / "config" / "benchmarks.csv"
 UNIVERSE_OVERRIDE = ROOT / "config" / "universe.csv"
 FUNDAMENTALS_PATH = ROOT / "config" / "fundamentals.csv"
@@ -19,6 +22,18 @@ NAV_DIR = ROOT / "淨值紀錄"
 DECISION_DIR = ROOT / "決策報告繳交紀錄"
 PREVIEW_DIR = ROOT / "data" / "preview"
 INBOX_BOOK = ROOT / "inbox" / "official_book.json"
+
+
+def active_schema_version() -> str:
+    """版本由實際官方 Schema 取得，不能把舊 Schema 改名假裝升級。"""
+    try:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        version = schema["properties"]["schema_version"]["const"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise PlanError("無法確認 D-Plan 官方 Schema 的固定版本") from exc
+    if not isinstance(version, str):
+        raise PlanError("D-Plan Schema 版本必須是字串")
+    return version
 
 
 def load_yaml(path: Path) -> dict:

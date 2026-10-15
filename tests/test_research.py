@@ -295,6 +295,16 @@ class SourcesTest(unittest.TestCase):
 
 
 class ProviderSafetyTest(unittest.TestCase):
+    def test_codex_reasoning_setting_does_not_break_optional_api_provider(self):
+        config = {"model": "unit-test-model", "reasoning_effort": "xhigh", "allow_live": False}
+        cli = build_provider({**config, "provider": "codex_cli"})
+        self.assertEqual(cli.reasoning_effort, "xhigh")
+        api = build_provider({**config, "provider": "openai_api"})
+        self.assertEqual(api.model, "unit-test-model")
+        with patch("requests.post", side_effect=AssertionError("no live API in tests")):
+            with self.assertRaises(LLMError):
+                api.generate("test", RESEARCH_SCHEMA)
+
     def test_live_requires_explicit_opt_in_and_mock_default_metadata(self):
         with patch.object(CodexCLIProvider, "doctor", side_effect=AssertionError("must not invoke CLI")):
             with self.assertRaises(LLMError):

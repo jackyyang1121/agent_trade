@@ -50,7 +50,7 @@ def parser():
         q.add_argument('--as-of', required=True)
         q.add_argument('--confirm', action='store_true', help='僅在已核對官方完整資料後設定')
         q.add_argument('--definition', choices=['top10_normalized', 'top10_raw', 'top15_normalized', 'top15_raw', 'full_normalized'])
-    q = sub.add_parser('import-book', help='匯入主辦實際結算庫存')
+    q = sub.add_parser('import-book', help='匯入官方 DataPack 或既有現金／持股帳本')
     _common(q); q.add_argument('path', type=Path)
     q.add_argument('--pricing-date', type=parse_date, required=True)
     q = sub.add_parser('mark-submitted', help='手動上傳且收到成功收件證據後記錄狀態')
@@ -69,6 +69,8 @@ def execute(args):
     if args.cmd == 'check':
         from agent.checks import schema_errors, semantic_errors
         from agent.compliance import structural_errors
+        if args.context is not None and not args.context.is_file():
+            raise PlanError(f'指定的驗證 context 不存在或不是檔案：{args.context}')
         document = json.loads(args.path.read_text(encoding='utf-8'))
         errors = schema_errors(document)
         context_path = args.context or args.path.with_suffix('.context.json')
@@ -89,8 +91,20 @@ def execute(args):
         if args.cmd == 'mark-submitted':
             return book.transition(args.run_id, 'SUBMITTED', receipt=args.receipt)
         raw = json.loads(args.path.read_text(encoding='utf-8'))
+        if not isinstance(raw, dict):
+            raise PlanError('官方帳本或 DataPack 必須是 JSON object')
+        if raw.get('doc_type') == 'DataPack' and raw.get('team_id') != str(load_settings().get('team_id')):
+            raise PlanError('DataPack 隊伍代號與目前設定不一致，原帳本不變')
+        if raw.get('doc_type') == 'DataPack':
+            from agent.datapack import parse_datapack
+            if parse_datapack(raw, args.pricing_date).generated_at > taipei_now():
+                raise PlanError('DataPack 產生時間在未來，原帳本不變')
         ledger = book.reconcile(raw, args.pricing_date)
-        return {'status': 'RECONCILED', 'as_of': ledger.last_settled_date, 'positions': len(ledger.positions)}
+        result = {'status': 'RECONCILED', 'as_of': ledger.last_settled_date, 'positions': len(ledger.positions)}
+        if ledger.official_data:
+            result.update(trade_date=ledger.official_data['trade_date'], prev_day_orders=ledger.official_data['prev_day_orders'],
+                          account=ledger.official_data['account'], compliance=ledger.official_data['compliance'])
+        return result
     if args.cmd in {'import-universe', 'import-benchmarks'}:
         from agent.orchestration.imports import import_data
         return import_data(args.cmd.removeprefix('import-'), args.path, state_dir, source_url=args.source_url,
@@ -117,7 +131,10 @@ def execute(args):
         return {'summary': store.summary(), 'matches': store.search(query) if query else []}
     if args.cmd == 'status':
         from agent.llm import CodexCLIProvider
+        from agent.config import SCHEMA_PATH, active_schema_version
         return {'provider': runtime['llm']['provider'], 'requested_model': runtime['llm'].get('model'),
+                'dplan_schema': {'path': str(SCHEMA_PATH), 'active_version': active_schema_version(),
+                                 'required_competition_version': runtime['competition'].get('required_dplan_schema_version', '4.3')},
                 'codex': CodexCLIProvider(model=runtime['llm'].get('model')).doctor(), 'knowledge': store.summary(),
                 'competition': runtime['competition'], 'team_id_configured': bool(load_settings().get('team_id')),
                 'state_dir': str(state_dir), 'forward_databases': [str(p) for p in state_dir.rglob('forward.sqlite3')],
