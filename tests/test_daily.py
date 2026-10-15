@@ -295,6 +295,26 @@ class DailyEndToEndTest(unittest.TestCase):
             with sqlite3.connect(database) as connection:
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM freezes").fetchone()[0], 0)
 
+    def test_shadow_optimizer_and_validator_use_the_same_top15_manifest_definition(self):
+        from agent.orchestration.configuration import load_runtime
+        runtime = load_runtime()
+        benchmark = self.root / "top15.csv"
+        benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF_TEST,{9000 + i},0.04\n" for i in range(15)), encoding="utf-8")
+        manifest = self.root / "top15-manifest.json"
+        manifest.write_text(json.dumps({"definition": "top15_raw"}), encoding="utf-8")
+        runtime["competition"].update(benchmarks_path=str(benchmark), benchmarks_manifest=str(manifest))
+        with patch.object(workflow, "load_runtime", return_value=runtime), \
+                patch.object(workflow, "construct", wraps=workflow.construct) as constructor:
+            summary = workflow.daily(mode="shadow", provider="mock", offline=True, fixture=self.fixture, state_dir=self.state)
+        self.assertEqual(constructor.call_count, 3)
+        for call in constructor.call_args_list:
+            self.assertEqual(call.args[6]["active_share_definition"], "top15_raw")
+        for portfolio in summary["portfolios"].values():
+            path = Path(portfolio["path"])
+            context = json.loads(path.with_suffix(".context.json").read_text(encoding="utf-8"))
+            self.assertEqual(context["active_share_definition"], "top15_raw")
+            self.assertEqual(semantic_errors(json.loads(path.read_text(encoding="utf-8")), context)[0], [])
+
     def test_synthetic_data_is_refused_for_official_competition(self):
         with self.assertRaisesRegex(PlanError, "正式競賽禁止"):
             workflow.daily(mode="competition", provider="mock", offline=True, fixture=self.fixture,

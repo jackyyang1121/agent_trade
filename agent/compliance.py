@@ -17,8 +17,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-from agent.config import valid_team_id
-from agent.ledger import Ledger, official_snapshot
+from agent.config import valid_team_id, active_schema_version
+from agent.ledger import Ledger, official_snapshot, datapack_source
 from agent.util import ROOT, TAIPEI, PlanError, stamp
 
 
@@ -85,6 +85,9 @@ def validate_competition_inputs(
     """
     competition = runtime.get("competition") or {}
     errors: list[str] = []
+    required_version = competition.get("required_dplan_schema_version", "4.3")
+    if active_schema_version() != required_version:
+        errors.append(f"正式競賽需要官方 D-Plan v{required_version} Schema；目前仍為 v{active_schema_version()}，不能只修改版本字串")
     if not valid_team_id(str(settings.get("team_id") or "")):
         errors.append("缺少主辦方正式 team_id")
     for key, expected in (("initial_capital", 1_000_000_000), ("commission_rate", 0.001425), ("tax_rate", 0.003), ("lot", 1000)):
@@ -121,6 +124,21 @@ def validate_competition_inputs(
     declared_ids = bench_manifest.get("etf_ids")
     if not isinstance(declared_ids, list) or not declared_ids or any(not isinstance(item, str) or not item for item in declared_ids) or len(set(declared_ids)) != len(declared_ids) or set(declared_ids) != set(benchmarks):
         errors.append("Active Share 缺少已確認完整 ETF 名單或基準覆蓋不完整")
+    if competition.get("official_etf_list_path"):
+        try:
+            with _path(competition["official_etf_list_path"]).open(encoding="utf-8-sig", newline="") as handle:
+                codes = [row["ticker"].strip() for row in csv.DictReader(handle)]
+            if not codes or any(not code for code in codes) or len(set(codes)) != len(codes):
+                raise ValueError("官方 ETF 名單為空、缺少代號或包含重複代號")
+            if set(codes) != set(benchmarks):
+                errors.append("Active Share 基準未完整涵蓋已配置的官方 ETF 名單：缺少 "
+                              + ",".join(sorted(set(codes) - set(benchmarks)))
+                              + "；額外 " + ",".join(sorted(set(benchmarks) - set(codes))))
+            list_date = date.fromisoformat(str(competition.get("official_etf_list_as_of")))
+            if pricing_date is None or list_date > pricing_date:
+                errors.append("官方 ETF 名單缺少必要定價日或資料日期超前")
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            errors.append(f"官方 ETF 名單不可驗證：{exc}")
     definition = bench_manifest.get("definition")
     if definition not in {"top15_normalized", "top15_raw"}:
         errors.append("Active Share 計算定義尚未明確確認；2026-10-05 公告改為前 15 大，權重是否重新正規化仍未確認")
@@ -173,7 +191,25 @@ def validate_competition_inputs(
         if not start <= local <= end:
             errors.append("不在正式收件時間窗（前一日 19:30 至交易日 08:55）")
 
-    if not ledger.reconciled or pricing_date is None or ledger.last_settled_date != pricing_date.isoformat():
+    initial_data = False
+    if required_version == "4.3" and not ledger.official_data:
+        errors.append("正式 v4.3 需匯入後台官方 DataPack，不能以自建現金／持股帳本取代")
+    if ledger.official_data:
+        try:
+            from agent.datapack import parse_datapack
+            snapshot = parse_datapack(ledger.official_data, pricing_date)
+            if snapshot.cash != ledger.cash or snapshot.positions != ledger.positions:
+                errors.append("內部帳本與官方 DataPack 的現金或可交易持股不一致")
+            if snapshot.team_id != str(settings.get("team_id")) or snapshot.trade_date != trade_day:
+                errors.append("DataPack 隊伍或下一個交易日與本次正式決策不一致")
+            if as_of.tzinfo is None or snapshot.generated_at > as_of:
+                errors.append("DataPack 產生時間晚於本次決策")
+            initial_data = snapshot.initial and trade_day.isoformat() == str(competition.get("first_trade_date"))
+            if snapshot.initial and (not initial_data or snapshot.cash != settings["initial_capital"]):
+                errors.append("首次全現金 DataPack 只能用於已確認首日，且本金必須一致")
+        except (PlanError, TypeError, ValueError) as exc:
+            errors.append(f"DataPack 官方帳本無效：{exc}")
+    if not ledger.reconciled or pricing_date is None or (ledger.last_settled_date != pricing_date.isoformat() and not initial_data):
         errors.append("缺少定價日已核對的主辦方現金/持股，禁止用模擬結算替代")
     try:
         official_snapshot({"as_of": pricing_date.isoformat(), "cash": str(ledger.cash), "positions": ledger.positions}, pricing_date)
@@ -248,7 +284,9 @@ class CompetitionBook:
         raw = json.loads(row["document"])
         pricing = date.fromisoformat(row["as_of"])
         cash, positions = official_snapshot(raw, pricing)
-        return Ledger(cash, positions, last_settled_date=pricing.isoformat(), reconciled=True)
+        source = datapack_source(raw)
+        return Ledger(cash, positions, last_settled_date=source["as_of_date"] if source else pricing.isoformat(),
+                      reconciled=True, official_data=source or {})
 
     def record_plan(self, run_id: str, doc: dict, context: dict | None = None) -> dict:
         from agent.checks import schema_errors
@@ -328,7 +366,10 @@ class CompetitionBook:
 
     def reconcile(self, rawbook: dict, pricing: date) -> Ledger:
         cash, positions = official_snapshot(rawbook, pricing)
-        normalized = {**rawbook, "as_of": pricing.isoformat(), "cash": str(cash), "positions": positions}
+        source = datapack_source(rawbook)
+        # 表格日期是內部定價索引；首日官方 as_of_date 仍在原文中保持 null，
+        # get_ledger 不會把這個索引冒充已結算日期。
+        normalized = {"as_of": pricing.isoformat(), "cash": str(cash), "positions": positions, "official_data": source} if source else {**rawbook, "as_of": pricing.isoformat(), "cash": str(cash), "positions": positions}
         encoded = _json(normalized)
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         with self._connect() as db:
@@ -344,7 +385,12 @@ class CompetitionBook:
                 official_run = rawbook.get("run_id")
                 settled = [plan for plan in submitted if plan["run_id"] == official_run] if official_run else submitted if len(submitted) == 1 else []
                 for plan in settled:
-                    for state in ("SETTLED", "RECONCILED"):
-                        self._event(db, plan["run_id"], state, {"official_book_digest": digest})
+                    outcome = source["prev_day_orders"]["outcome"] if source else "executed"
+                    result_state = "SETTLED" if outcome == "executed" else "VOIDED" if outcome == "voided" else "NOT_EXECUTED"
+                    detail = {"official_book_digest": digest}
+                    if source:
+                        detail["prev_day_orders"] = source["prev_day_orders"]
+                    for state in (result_state, "RECONCILED"):
+                        self._event(db, plan["run_id"], state, detail)
                     db.execute("UPDATE plans SET state='RECONCILED' WHERE run_id=?", (plan["run_id"],))
         return self.get_ledger()

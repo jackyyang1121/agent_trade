@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from decimal import Decimal
 from datetime import date, datetime
 from pathlib import Path
 
@@ -239,9 +240,16 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
                                           "universe": snapshot.universe, "synthetic": snapshot.synthetic}, immutable=True)
         config = runtime["competition"]
         benchmarks = {}
+        manifest = None
+        definition = config.get("active_share_definition") or "top15_normalized"
         if config.get("benchmarks_path"):
             from .imports import read_benchmarks
-            benchmarks = read_benchmarks(Path(config["benchmarks_path"]))
+            benchmark_path = Path(config["benchmarks_path"])
+            benchmarks = read_benchmarks(benchmark_path if benchmark_path.is_absolute() else ROOT / benchmark_path)
+            if config.get("benchmarks_manifest"):
+                manifest_path = Path(config["benchmarks_manifest"])
+                manifest = json.loads((manifest_path if manifest_path.is_absolute() else ROOT / manifest_path).read_text(encoding="utf-8"))
+                definition = manifest["definition"]
         if mode == "competition":
             metadata = research.get("metadata", {})
             validate_competition_inputs(settings, runtime, snapshot.universe, benchmarks, book.get_ledger(), day,
@@ -288,6 +296,10 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
                 atomic_json(saved_variant_path, portfolios[variant], immutable=True)
                 continue
             ledger = book.get_ledger() if mode == "competition" else tracker.ledger(variant)
+            if ledger.official_data:
+                official_nav = Decimal(str(ledger.official_data["account"]["nav_tradable"]))
+                if abs(ledger.nav_on(prepared["prices"]) - official_nav) > Decimal("0.02"):
+                    raise PlanError("必要定價行情與官方 DataPack 的 nav_tradable 不一致，禁止推測目標股數")
             choices = fuse(quant, signals, variant, ledger.positions, {**strategy["portfolio"], **runtime["signals"], "as_of": cutoff})
             metrics = copy.deepcopy(prepared["metrics"])
             for ticker, choice in choices.items():
@@ -296,8 +308,8 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
                 for key in ("volatility_20", "mean_correlation", "correlations", "tradable"):
                     metrics[ticker][key] = quant.get(ticker, {}).get(key)
             portfolio_config = {**strategy["portfolio"], **runtime["signals"]}
+            portfolio_config["active_share_definition"] = definition
             if mode == "competition":
-                manifest = json.loads(Path(config["benchmarks_manifest"]).read_text(encoding="utf-8"))
                 portfolio_config.update(require_benchmarks=True, active_share_definition_confirmed=True,
                                         active_share_definition=manifest["definition"])
             plan = construct({t: c["score"] for t, c in choices.items()}, metrics, prepared["prices"], prepared["industries"],
@@ -323,7 +335,7 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
                        "benchmarks": benchmarks, "active_share_min": strategy["portfolio"]["active_share_min"],
                        "universe": [r["ticker"] for r in snapshot.universe], "competition": mode == "competition",
                        "as_of": cutoff, "validation_time": document["agent_metadata"]["run_completed_at"],
-                       "pricing_date": pricing.isoformat()}
+                       "pricing_date": pricing.isoformat(), "active_share_definition": definition}
             context["investment_decisions"] = choices
             if mode == "competition":
                 context.update(mode="competition", active_share_definition_confirmed=True,

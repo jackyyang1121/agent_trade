@@ -21,6 +21,7 @@ class Ledger:
     pending: dict | None = None
     nav_history: list[dict] = field(default_factory=list)
     reconciled: bool = False
+    official_data: dict = field(default_factory=dict)
 
     def nav_on(self, prices: dict[str, float]) -> Decimal:
         total = self.cash
@@ -91,6 +92,7 @@ def load_ledger(initial_capital: float, path: Path | None = None) -> Ledger:
         pending=raw.get("pending"),
         nav_history=list(raw.get("nav_history") or []),
         reconciled=raw.get("reconciled") is True,
+        official_data=raw.get("official_data") or {},
     )
 
 
@@ -106,6 +108,8 @@ def save_ledger(ledger: Ledger, path: Path | None = None) -> None:
         "nav_history": ledger.nav_history,
         "reconciled": ledger.reconciled,
     }
+    if ledger.official_data:
+        payload["official_data"] = ledger.official_data
     _book_values(payload)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -120,6 +124,19 @@ def save_ledger(ledger: Ledger, path: Path | None = None) -> None:
 
 
 def official_snapshot(raw: dict, pricing: date) -> tuple[Decimal, dict[str, int]]:
+    source = datapack_source(raw)
+    if source:
+        from agent.datapack import parse_datapack
+        snapshot = parse_datapack(source, pricing)
+        # 委託整張限制沿用既有系統；若官方可交易庫存出現非整張，
+        # 不截斷或捨棄股數，交由明確的相容性錯誤阻擋。
+        if any(shares % 1000 for shares in snapshot.positions.values()):
+            raise PlanError("DataPack 可交易庫存含非整張；目前下單公式尚不支援，不可截斷庫存")
+        if raw is not source:
+            cash, positions = _book_values(raw)
+            if cash != snapshot.cash or positions != snapshot.positions:
+                raise PlanError("內部帳本與原始 DataPack 的現金或持股不一致")
+        return snapshot.cash, snapshot.positions
     try:
         as_of = parse_date(str(raw["as_of"]))
     except (TypeError, KeyError, ValueError) as exc:
@@ -127,6 +144,13 @@ def official_snapshot(raw: dict, pricing: date) -> tuple[Decimal, dict[str, int]
     if as_of != pricing:
         raise PlanError(f"官方帳本日期 {as_of} 與必要定價日 {pricing} 不一致")
     return _book_values(raw)
+
+
+def datapack_source(raw: dict) -> dict | None:
+    if isinstance(raw, dict) and raw.get("doc_type") == "DataPack":
+        return raw
+    source = raw.get("official_data") if isinstance(raw, dict) else None
+    return source if isinstance(source, dict) and source.get("doc_type") == "DataPack" else None
 
 
 def apply_official_book(ledger: Ledger, pricing: date, path: Path | None = None) -> str | None:
@@ -137,7 +161,9 @@ def apply_official_book(ledger: Ledger, pricing: date, path: Path | None = None)
     cash, positions = official_snapshot(raw, pricing)
     ledger.cash = cash
     ledger.positions = positions
-    ledger.last_settled_date = pricing.isoformat()
+    source = datapack_source(raw)
+    ledger.official_data = source or {}
+    ledger.last_settled_date = source["as_of_date"] if source else pricing.isoformat()
     ledger.reconciled = True
     if ledger.pending and str(ledger.pending.get("trade_date")) <= pricing.isoformat():
         ledger.pending = None

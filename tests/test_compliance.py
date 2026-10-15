@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from agent.checks import semantic_errors
 from agent.compliance import CompetitionBook, structural_errors, validate_competition_inputs
@@ -31,7 +32,7 @@ def valid_plan():
         "agent_metadata": {"model_provider": "openai", "model_version": "recorded-test-model", "run_started_at": "2026-10-27T07:00:00+08:00", "run_completed_at": "2026-10-27T07:01:00+08:00", "code_version": "sha256:test"},
     }
     context = {"held": {ticker: 40000 for ticker in tickers}, "prices": {ticker: 100.0 for ticker in tickers}, "pre_nav": 100000000, "cash": "20000000", "commission": 0.001425, "tax": 0.003,
-               "universe": tickers, "benchmarks": {"ETF": {str(3000 + i): 0.04 for i in range(10)}}, "benchmark_etf_ids": ["ETF"], "active_share_definition_confirmed": True, "active_share_definition": "top10_normalized", "active_share_min": 0.15, "as_of": "2026-10-27T07:02:00+08:00", "pricing_date": "2026-10-23", "mode": "competition"}
+               "universe": tickers, "benchmarks": {"ETF": {str(3000 + i): 0.04 for i in range(15)}}, "benchmark_etf_ids": ["ETF"], "active_share_definition_confirmed": True, "active_share_definition": "top15_normalized", "active_share_min": 0.15, "as_of": "2026-10-27T07:02:00+08:00", "pricing_date": "2026-10-23", "mode": "competition"}
     return document, context
 
 
@@ -54,6 +55,14 @@ class SemanticSafetyTests(unittest.TestCase):
     def test_valid_hold_and_no_trade_book(self):
         document, context = valid_plan()
         self.assertEqual(semantic_errors(document, context)[0], [])
+
+    def test_formal_active_share_cannot_use_legacy_basket_or_weaken_threshold(self):
+        for definition, minimum in [("top10_normalized", 0.15), ("top15_normalized", 0.01),
+                                    ("top15_normalized", float("nan")), ("top15_normalized", True)]:
+            with self.subTest(definition=definition, minimum=minimum):
+                document, context = valid_plan()
+                context.update(active_share_definition=definition, active_share_min=minimum)
+                self.assertTrue(any("Active Share" in error for error in semantic_errors(document, context)[0]))
 
     def test_missing_active_share_fails_closed(self):
         document, context = valid_plan()
@@ -187,7 +196,8 @@ class CompetitionGateTests(unittest.TestCase):
         benchmark = self.root / "benchmarks.csv"
         benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF,{3000+i},0.04\n" for i in range(15)), encoding="utf-8")
         self.settings = {"team_id": "TEAM_TEST", "initial_capital": 1000000000, "commission_rate": 0.001425, "tax_rate": 0.003, "lot": 1000, "universe_as_of": "2026-07-31"}
-        self.runtime = {"competition": {"official_universe_path": str(universe), "universe_manifest": {"source_url": "https://www.esunbank.com/competition/universe", "confirmed": True, "sha256": hashlib.sha256(universe.read_bytes()).hexdigest(), "as_of": "2026-07-31"},
+        # 舊官方 Schema 的測試替身；不代表正式 v4.3 已驗證。
+        self.runtime = {"competition": {"required_dplan_schema_version": "4.2", "official_universe_path": str(universe), "universe_manifest": {"source_url": "https://www.esunbank.com/competition/universe", "confirmed": True, "sha256": hashlib.sha256(universe.read_bytes()).hexdigest(), "as_of": "2026-07-31"},
                                         "benchmarks_path": str(benchmark), "benchmarks_manifest": {"source_url": "https://www.twse.com.tw/etf", "confirmed": True, "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(), "as_of": "2026-10-23", "etf_ids": ["ETF"], "definition": "top15_normalized"},
                                         "schedule_confirmed": True, "first_trade_date": "2026-10-27", "last_trade_date": "2026-11-30", "allow_degraded": False}}
         self.benchmarks = {"ETF": {str(3000+i): 0.04 for i in range(15)}}
@@ -199,6 +209,24 @@ class CompetitionGateTests(unittest.TestCase):
 
     def test_confirmed_inputs_pass(self):
         self.assertIsNone(self.gate())
+
+    def test_missing_required_official_schema_blocks_formal_submission(self):
+        self.runtime["competition"]["required_dplan_schema_version"] = "4.3"
+        with self.assertRaisesRegex(PlanError, "官方 D-Plan v4.3 Schema"):
+            self.gate()
+
+    def test_formal_v43_requires_official_datapack_even_when_schema_is_available(self):
+        self.runtime["competition"]["required_dplan_schema_version"] = "4.3"
+        with patch("agent.compliance.active_schema_version", return_value="4.3"):
+            with self.assertRaisesRegex(PlanError, "官方 DataPack"):
+                self.gate()
+
+    def test_manifest_cannot_omit_a_configured_official_etf(self):
+        path = self.root / "official-etfs.csv"
+        path.write_text("ticker,name,market\nETF,Unit test one,twse\nETF_MISSING,Unit test two,twse\n", encoding="utf-8")
+        self.runtime["competition"].update(official_etf_list_path=str(path), official_etf_list_as_of="2026-10-23")
+        with self.assertRaisesRegex(PlanError, "ETF_MISSING"):
+            self.gate()
 
     def test_formal_happy_path_guard_generated_validated_submitted_reconciled(self):
         """The formal path can succeed with complete, explicitly supplied inputs.

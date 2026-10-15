@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from agent.util import ROOT, PlanError
+from agent.config import SCHEMA_PATH
 
 
 def load_runtime(path: Path | None = None) -> dict:
@@ -25,7 +26,7 @@ def strategy_version(runtime: dict | None = None) -> str:
 
     digest = hashlib.sha256()
     paths = sorted((ROOT / "agent").rglob("*.py")) + sorted((ROOT / "config").glob("*.yaml"))
-    paths += [ROOT / "ETF投資策略說明文檔.md", ROOT / "(驗證繳交格式)D-Plan.schema_v4.2.json"]
+    paths += [ROOT / "ETF投資策略說明文檔.md", SCHEMA_PATH]
     for path in paths:
         digest.update(path.relative_to(ROOT).as_posix().encode())
         digest.update(path.read_bytes())
