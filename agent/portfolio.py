@@ -33,24 +33,45 @@ def cap_of(ticker: str, portfolio: dict) -> float:
     return max(0.0, min(regulatory, configured, decision))
 
 
-def active_share(our_weights: dict[str, float], bench_weights: dict[str, float], definition: str = "top10_normalized") -> float:
-    """Explicit calculation convention; official normalization needs confirmation.
+# 2026-10-05 主辦公告改為比較前 15 大，低於 15% 才違規。
+# top10_* 只保留既有公式測試；正式競賽只接受尚未二選一的 top15_*。
+ACTIVE_SHARE_DEFINITIONS = {
+    "top10_normalized": (10, True),
+    "top10_raw": (10, False),
+    "top15_normalized": (15, True),
+    "top15_raw": (15, False),
+    "full_normalized": (None, True),
+}
 
-    The competition text specifies both top-ten baskets but not their
-    normalization. Callers must confirm the configured definition before formal
-    submission; this default preserves the research/backwards-compatible API.
+
+def active_share_basket_size(definition: str) -> int | None:
+    try:
+        size, _normalized = ACTIVE_SHARE_DEFINITIONS[definition]
+    except KeyError as exc:
+        raise PlanError(f"未知 Active Share 定義 {definition}") from exc
+    return size
+
+
+def active_share(our_weights: dict[str, float], bench_weights: dict[str, float], definition: str = "top10_normalized") -> float:
+    """Basket formula. Official top-15 normalization is still unconfirmed.
+
+    The 2026-10-05 organizer notice compares the top 15 holdings and treats
+    Active Share below 15% as a violation. It does not say whether those
+    weights are renormalized. Callers must confirm top15_normalized or
+    top15_raw before a formal submission.
     """
     if any(not math.isfinite(float(v)) or float(v) < 0 for v in list(our_weights.values()) + list(bench_weights.values())):
         raise PlanError("Active Share 權重必須為非負有限數值")
-    if definition == "full_normalized":
+    size, normalized = ACTIVE_SHARE_DEFINITIONS.get(definition, (None, None))
+    if definition not in ACTIVE_SHARE_DEFINITIONS:
+        raise PlanError(f"未知 Active Share 定義 {definition}")
+    if size is None:
         return _active_share_vectors(our_weights, bench_weights)
-    our_top = dict(sorted(our_weights.items(), key=lambda item: (-item[1], item[0]))[:10])
-    bench_top = dict(sorted(bench_weights.items(), key=lambda item: (-item[1], item[0]))[:10])
-    if definition == "top10_normalized":
+    our_top = dict(sorted(our_weights.items(), key=lambda item: (-item[1], item[0]))[:size])
+    bench_top = dict(sorted(bench_weights.items(), key=lambda item: (-item[1], item[0]))[:size])
+    if normalized:
         return _active_share_vectors(our_top, bench_top)
-    if definition == "top10_raw":
-        return 0.5 * sum(abs(our_top.get(t, 0) - bench_top.get(t, 0)) for t in set(our_top) | set(bench_top))
-    raise PlanError(f"未知 Active Share 定義 {definition}")
+    return 0.5 * sum(abs(our_top.get(ticker, 0) - bench_top.get(ticker, 0)) for ticker in set(our_top) | set(bench_top))
 
 
 def _renorm(weights: dict[str, float]) -> dict[str, float]:
@@ -99,7 +120,7 @@ def repair_active_share(
         if worst >= buffer or etf_id is None:
             break
         bench = benchmarks[etf_id]
-        ranked = sorted(current, key=lambda ticker: current[ticker], reverse=True)[:10]
+        ranked = sorted(current, key=lambda ticker: current[ticker], reverse=True)[: active_share_basket_size(definition) or len(current)]
         overlap = max(ranked, key=lambda ticker: min(current[ticker], bench.get(ticker, 0.0)))
         replacement = next((ticker for ticker in eligible if ticker not in current and bench.get(ticker, 0.0) <= 0), None)
         if replacement is None or overlap == replacement:

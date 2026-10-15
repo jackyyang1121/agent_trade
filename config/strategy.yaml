@@ -49,7 +49,8 @@ portfolio:
     risk_on: 0.04
     neutral: 0.06
     risk_off: 0.12
-  active_share_min: 0.20
+  # 2026-10-05 主辦公告：低於 15% 才違規。buffer 仍是策略緩衝，不是公告門檻。
+  active_share_min: 0.15
   active_share_buffer: 0.28
 
 regime_rules:

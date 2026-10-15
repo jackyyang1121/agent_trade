@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from jsonschema import Draft202012Validator, FormatChecker
 
 from agent.config import SCHEMA_PATH
-from agent.portfolio import active_share, estimate
+from agent.portfolio import active_share, active_share_basket_size, estimate
 from agent.util import PlanError, target_shares
 
 
@@ -327,8 +327,13 @@ def semantic_errors(doc: dict, ctx: dict | None = None) -> tuple[list[str], list
         for ticker, shares in positions.items():
             our[ticker] = shares * prices[ticker] / float(nav_after)
     benchmarks = ctx.get("benchmarks") or {}
+    definition = str(ctx.get("active_share_definition") or "top15_normalized")
+    try:
+        basket = active_share_basket_size(definition) or 15
+    except PlanError:
+        basket = 15
     if not benchmarks:
-        message = "沒有主動 ETF 前十大持股，Active Share 這條競賽限制尚未檢查"
+        message = f"沒有主動 ETF 前{basket}大持股，Active Share 這條競賽限制尚未檢查"
         (errors if competition else warnings).append(message)
     else:
         if competition and not ctx.get("active_share_definition_confirmed"):
@@ -336,19 +341,20 @@ def semantic_errors(doc: dict, ctx: dict | None = None) -> tuple[list[str], list
         expected = set(ctx.get("benchmark_etf_ids") or [])
         if expected and expected != set(benchmarks):
             errors.append("Active Share 基準名單與已確認完整清單不一致")
+        minimum = float(ctx.get("active_share_min", 0.15))
         for etf_id, bench in benchmarks.items():
             try:
-                valid_weights = isinstance(bench, dict) and len(bench) == 10 and all(math.isfinite(float(value)) and float(value) > 0 for value in bench.values())
+                valid_weights = isinstance(bench, dict) and len(bench) == basket and all(math.isfinite(float(value)) and float(value) > 0 for value in bench.values())
             except (ValueError, TypeError):
                 valid_weights = False
             if not valid_weights:
-                errors.append(f"{etf_id} 基準缺少完整前十大正數權重")
+                errors.append(f"{etf_id} 基準缺少完整前{basket}大正數權重")
                 continue
             try:
-                score = active_share(our, bench, ctx.get("active_share_definition", "top10_normalized"))
+                score = active_share(our, bench, definition)
             except (ValueError, PlanError) as exc:
                 errors.append(f"{etf_id} Active Share 定義無效：{exc}")
                 continue
-            if score < float(ctx.get("active_share_min", 0.20)) - 1e-9:
-                errors.append(f"相對 {etf_id} 的 Active Share {score:.2%} 低於 20%")
+            if score < minimum - 1e-9:
+                errors.append(f"相對 {etf_id} 的 Active Share {score:.2%} 低於 {minimum:.0%}")
     return errors, warnings

@@ -5,22 +5,22 @@ alwaysApply: true
 
 # 每日研究與決策報告
 
-先讀根目錄 `AGENTS.md` 與 `docs/DAILY_WORKFLOW.md`。於現有 checkout 執行，先確認 `git status`，不得覆蓋使用者修改。`py` 必須指向已安裝 requirements 的 Python，可改用 `.venv\Scripts\python.exe`。
+先讀根目錄 `AGENTS.md` 與 `docs/DAILY_WORKFLOW.md`。於現有 checkout 執行，先確認 `git status`，不得覆蓋使用者修改。先 `conda activate agent_trade`，再用該環境已安裝 requirements 的 `python`。
 
 使用者未明示正式競賽時，採 Shadow；清楚區分真實研究與離線展示：
 
-```powershell
-py -m agent status
-py scripts/create_demo_fixture.py --output data/runtime/demo_market.json
-py -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json
+```bash
+python -m agent status
+python scripts/create_demo_fixture.py --output data/runtime/demo_market.json
+python -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json
 ```
 
 Mock 是工程驗證，不能回報為真實 GPT 投資研究。使用者已授權真實 Codex 研究時，確認 CLI 登入、來源及用量預算後使用 `--provider codex_cli --live`；不能自行遞迴啟動多層 Codex。`--model` 可覆寫設定，不硬編碼模型名稱。
 
 明示正式競賽時執行：
 
-```powershell
-py -m agent daily --mode competition --provider codex_cli --live
+```bash
+python -m agent daily --mode competition --provider codex_cli --live
 ```
 
 - 先核對隊伍代號、官方固定 150 檔名單、完整 Active Share 基準、官方庫存／現金、前日定價及已確認賽程。缺少必要條件時保持正式模式阻擋，不猜測、不改檢查來放行。

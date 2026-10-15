@@ -2,7 +2,7 @@
 
 ## 專案目的與優先依據
 
-本專案為 Evidence-Driven Asymmetric Momentum 的雙引擎研究、競賽 D-Plan 與 Forward Testing 系統。使用者主要使用 Windows、Cursor 與 PowerShell；文件使用繁體中文，程式識別字可用英文。
+本專案為 Evidence-Driven Asymmetric Momentum 的雙引擎研究、競賽 D-Plan 與 Forward Testing 系統。使用者主要使用 Windows、Cursor、bash 與 conda 環境 `agent_trade`；文件使用繁體中文，程式識別字可用英文。
 
 開始前先讀 `競賽說明文檔.md`、`D-Plan_撰寫指南_v4.2 (1).md`、官方 v4.2 Schema、最新 `ETF投資策略說明文檔.md`、`config/` 及相關模組。官方規範若矛盾，保留可配置規則與明確確認狀態，不自行宣稱已解決。
 
@@ -38,13 +38,14 @@
 
 ## 驗證與交付
 
-```powershell
-py -m unittest discover -s tests -v
-py -m agent status
-py scripts/create_demo_fixture.py --output data/runtime/demo_market.json
-py -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json --state-dir data\experiments\review
-py -m agent knowledge --synthetic --state-dir data\experiments\review
-py -m agent evaluate --state-dir data\experiments\review
+```bash
+conda activate agent_trade
+python -m unittest discover -s tests -v
+python -m agent status
+python scripts/create_demo_fixture.py --output data/runtime/demo_market.json
+python -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json --state-dir data/experiments/review
+python -m agent knowledge --synthetic --state-dir data/experiments/review
+python -m agent evaluate --state-dir data/experiments/review
 ```
 
 執行與變更相符的測試。需要真實來源或 Codex 時另外明示 Live 驗證，記錄網路、登入或資料限制，不將離線通過宣稱為投資效果。交付前檢查 diff、測試結果、設定和文件是否一致；保持官方 Schema、官方文檔與 ETF 宣告不因工程重構而被任意改寫。

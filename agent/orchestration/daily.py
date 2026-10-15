@@ -126,7 +126,8 @@ def daily(*, mode: str = "shadow", trade_date: date | None = None, runtime_path:
         raise PlanError("正式競賽禁止 Mock／fixture／離線模擬資料")
     settings, strategy, prospectus = load_settings(), load_strategy(), load_prospectus()
     if runtime["competition"].get("official_universe_path"):
-        settings["official_universe_path"] = runtime["competition"]["official_universe_path"]
+        universe_path = Path(runtime["competition"]["official_universe_path"])
+        settings["official_universe_path"] = str(universe_path if universe_path.is_absolute() else ROOT / universe_path)
     state_dir = state_path(runtime, state_dir)
     if dry_run:
         import tempfile

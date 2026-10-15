@@ -1,25 +1,26 @@
 # 排錯與恢復
 
-## Python／PowerShell
+## Python／conda
 
-`py` 找不到時，安裝受支援 Python，或直接使用已存在的 `.\.venv\Scripts\python.exe`。先在專案根目錄執行，確認該解譯器已安裝 `requirements.txt`；不要把不同 Python 的 `pip` 與執行環境混用。
+先在專案根目錄執行 `conda activate agent_trade`，確認 `python` 與 `python -m pip` 都來自這個環境，且已安裝 `requirements.txt`。不要把其他環境的 `pip` 裝到 `agent_trade`，也不要用系統的 `py` 啟動器繞過已啟用的 conda。
 
-PowerShell 阻擋 Activate.ps1 時，可以直接執行虛擬環境的 Python，不必為專案調低系統執行政策：
+`agent_trade` 若是 Python 3.15，PyYAML 6.0.3 沒有 Windows 預編套件，pip 會改編譯 C 擴充並要求 Visual C++。安裝時加上 `PYYAML_FORCE_LIBYAML=0`，改用純 Python 的 PyYAML，不需要編譯器。這個環境變數只影響從原始碼建置；已有預編套件的 Python 版本仍會直接用套件。
 
-```powershell
-.\.venv\Scripts\python.exe -m agent status
+```bash
+conda activate agent_trade
+python -m agent status
 ```
 
-路徑有空格時用雙引號包住。JSON／CSV 用 UTF-8；股票代號保持字串，CSV 不要讓試算表自動轉換代號或百分比單位。若 Windows 出現 `ZoneInfoNotFoundError: Asia/Taipei`，用同一虛擬環境重新安裝 requirements；其中的 Windows 專用 `tzdata` 提供 IANA 時區資料。
+路徑有空格時用雙引號包住。JSON／CSV 用 UTF-8；股票代號保持字串，CSV 不要讓試算表自動轉換代號或百分比單位。若 Windows 出現 `ZoneInfoNotFoundError: Asia/Taipei`，用同一個 conda 環境重新安裝 requirements；其中的 Windows 專用 `tzdata` 提供 IANA 時區資料。
 
 ## Codex 無法登入或參數不支援
 
-```powershell
+```bash
 codex --version
 codex exec --help
 codex login status
 codex login
-py -m agent status
+python -m agent status
 ```
 
 請在使用者本機瀏覽器完成登入，不把憑證貼進聊天或寫進設定。模型留空時沿用 Codex 可用設定；模型權限錯誤可移除覆寫或選擇帳號支援的名稱，不猜測已退役的模型 ID。

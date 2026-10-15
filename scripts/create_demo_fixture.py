@@ -1,6 +1,6 @@
 """產生確定性、明確標示的合成行情；不包含真實公司或投資研究。
 
-PowerShell: py scripts/create_demo_fixture.py --output data/runtime/demo_market.json
+bash: python scripts/create_demo_fixture.py --output data/runtime/demo_market.json
 僅供 --offline --provider mock --fixture 驗證，不可用於正式競賽。
 """
 from __future__ import annotations

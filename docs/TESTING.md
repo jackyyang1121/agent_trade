@@ -4,16 +4,17 @@
 
 自動測試使用 Python `unittest`、Mock provider 與固定 fixture，不要求 Codex 登入、付費 API Key 或外部網站即時可用。於 Repository 根目錄執行：
 
-```powershell
-py -m unittest discover -s tests -v
-py -m agent status
-py scripts/create_demo_fixture.py --output data/runtime/demo_market.json
-py -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json --state-dir data\experiments\acceptance
-py -m agent knowledge --synthetic --state-dir data\experiments\acceptance
-py -m agent evaluate --state-dir data\experiments\acceptance
+```bash
+conda activate agent_trade
+python -m unittest discover -s tests -v
+python -m agent status
+python scripts/create_demo_fixture.py --output data/runtime/demo_market.json
+python -m agent daily --mode shadow --provider mock --offline --fixture data/runtime/demo_market.json --state-dir data/experiments/acceptance
+python -m agent knowledge --synthetic --state-dir data/experiments/acceptance
+python -m agent evaluate --state-dir data/experiments/acceptance
 ```
 
-測試環境可使用 `.\.venv\Scripts\python.exe` 取代 `py`。請以命令實際輸出的通過數與錯誤為準，不把本文視為某次執行結果。離線 CLI 使用明確建立的合成行情；預設 Mock 不新增研究假說。完整研究整合測試透過明確的 MockProvider 回應 fixture 驗證來源、Thesis、圖譜與訊號的傳遞；不是依賴預設 Mock 製造投資故事。全部輸出須保留 synthetic／Mock 標記。
+請以命令實際輸出的通過數與錯誤為準，不把本文視為某次執行結果。離線 CLI 使用明確建立的合成行情；預設 Mock 不新增研究假說。完整研究整合測試透過明確的 MockProvider 回應 fixture 驗證來源、Thesis、圖譜與訊號的傳遞；不是依賴預設 Mock 製造投資故事。全部輸出須保留 synthetic／Mock 標記。
 
 ## 應維持的工程不變條件
 
@@ -32,8 +33,8 @@ py -m agent evaluate --state-dir data\experiments\acceptance
 
 ## Schema 與語意驗證
 
-```powershell
-py -m agent check "(範例)D-Plan_TEAM_042_2026-10-27.json"
+```bash
+python -m agent check "(範例)D-Plan_TEAM_042_2026-10-27.json"
 ```
 
 官方範例含節錄與合理推估數字，只能用於格式示範，不能作為真實市場 fixture 或完整帳本語意合規證明。檔案沒有正式 context 時，Schema 通過不代表可提交；完整語意驗證還需要實際持股、現金、前日價格、官方股票池與基準。
@@ -42,16 +43,16 @@ py -m agent check "(範例)D-Plan_TEAM_042_2026-10-27.json"
 
 Live 測試獨立且必須明確選擇，會使用帳號額度：
 
-```powershell
+```bash
 codex --version
 codex exec --help
 codex login status
-py -m agent research --ticker 3363 --provider codex_cli --live
+python -m agent research --ticker 3363 --provider codex_cli --live
 ```
 
 `status`／doctor 檢查版本、參數與登入不等於執行投資研究。請檢查研究執行紀錄中的 provider、實際模型、來源、時間、錯誤與用量；未知 token 數保持省略，不能編造。Codex JSONL 若沒有實際模型，不能用 `model_requested` 冒充；正式模式應維持阻擋。Adapter 已實作但尚未完成真實研究 Live 驗證。不要在單元測試中反覆啟動真實 Codex，也不要把 Codex 自己的執行環境當成可無限制遞迴的 worker。
 
-測試中外部研究來源的預設 `allowed_domains: []` 必須拒絕下載；Live 示範須先配置合法可信網域，不能只加 `--live` 就認為任意網站已允許。Windows 的 `tzdata` 安裝列入依賴，原生 PowerShell／Windows 執行仍待獨立驗證。
+測試中外部研究來源的預設 `allowed_domains: []` 必須拒絕下載；Live 示範須先配置合法可信網域，不能只加 `--live` 就認為任意網站已允許。Windows 的 `tzdata` 安裝列入依賴，原生 Windows 執行仍待獨立驗證。
 
 真實行情測試另需網路允許 TWSE／TPEx 等必要網域。HTTP 403 或代理拒絕時應記錄阻擋，不改用虛構即時行情。離線整合通過與真實來源、Codex 或正式競賽已驗證是不同結論。
 

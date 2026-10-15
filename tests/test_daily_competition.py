@@ -75,7 +75,7 @@ class DailyCompetitionContractTest(unittest.TestCase):
             writer.writeheader()
             writer.writerows(raw["universe"])
         benchmark = self.root / "benchmark-test-double.csv"
-        benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF_TEST,{9000 + i},0.04\n" for i in range(10)), encoding="utf-8")
+        benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF_TEST,{9000 + i},0.04\n" for i in range(15)), encoding="utf-8")
         universe_manifest = self.root / "universe.manifest.json"
         universe_manifest.write_text(json.dumps({"source_url": "https://www.esunbank.com/", "confirmed": True,
                                                 "sha256": hashlib.sha256(universe.read_bytes()).hexdigest(),
@@ -84,7 +84,7 @@ class DailyCompetitionContractTest(unittest.TestCase):
         benchmark_manifest.write_text(json.dumps({"source_url": "https://www.twse.com.tw/", "confirmed": True,
                                                  "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(),
                                                  "as_of": self.pricing.isoformat(), "etf_ids": ["ETF_TEST"],
-                                                 "definition": "top10_normalized"}), encoding="utf-8")
+                                                 "definition": "top15_normalized"}), encoding="utf-8")
         self.runtime["competition"].update(official_universe_path=str(universe), universe_manifest=str(universe_manifest),
                                             benchmarks_path=str(benchmark), benchmarks_manifest=str(benchmark_manifest),
                                             schedule_confirmed=True, first_trade_date="2026-10-27",

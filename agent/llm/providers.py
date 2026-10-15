@@ -104,12 +104,17 @@ class CodexCLIProvider:
         "tool_call_mcp_elicitation", "remote_control", "request_permissions_tool",
     )
 
+    REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+
     def __init__(
         self, model: str | None = None, timeout_seconds: float = 120,
         max_retries: int = 1, allow_live: bool = False, executable: str = "codex",
-        max_output_bytes: int = 2_000_000,
+        max_output_bytes: int = 2_000_000, reasoning_effort: str | None = None,
     ):
         self.model = model or None
+        self.reasoning_effort = reasoning_effort or None
+        if self.reasoning_effort not in {None, *self.REASONING_EFFORTS}:
+            raise LLMError("不支援的推理強度")
         self.timeout = float(timeout_seconds)
         self.retries = max(0, min(int(max_retries), 3))
         self.allow_live = bool(allow_live)
@@ -189,6 +194,8 @@ class CodexCLIProvider:
             command.extend(["--disable", feature])
         if self.model:
             command.extend(["--model", self.model])
+        if self.reasoning_effort:
+            command.extend(["--config", f'model_reasoning_effort="{self.reasoning_effort}"'])
         return command + ["-"]
 
     @staticmethod
@@ -399,7 +406,7 @@ def build_provider(config: dict | None = None) -> Provider:
     provider = config.pop("provider", "codex_cli")
     if provider == "mock":
         return MockProvider(config.get("responses"))
-    allowed = {"model", "timeout_seconds", "max_retries", "allow_live"}
+    allowed = {"model", "timeout_seconds", "max_retries", "allow_live", "reasoning_effort"}
     if provider == "codex_cli":
         allowed.update({"executable", "max_output_bytes"})
         return CodexCLIProvider(**{key: value for key, value in config.items() if key in allowed})

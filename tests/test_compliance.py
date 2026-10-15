@@ -31,7 +31,7 @@ def valid_plan():
         "agent_metadata": {"model_provider": "openai", "model_version": "recorded-test-model", "run_started_at": "2026-10-27T07:00:00+08:00", "run_completed_at": "2026-10-27T07:01:00+08:00", "code_version": "sha256:test"},
     }
     context = {"held": {ticker: 40000 for ticker in tickers}, "prices": {ticker: 100.0 for ticker in tickers}, "pre_nav": 100000000, "cash": "20000000", "commission": 0.001425, "tax": 0.003,
-               "universe": tickers, "benchmarks": {"ETF": {str(3000 + i): 0.04 for i in range(10)}}, "benchmark_etf_ids": ["ETF"], "active_share_definition_confirmed": True, "active_share_definition": "top10_normalized", "as_of": "2026-10-27T07:02:00+08:00", "pricing_date": "2026-10-23", "mode": "competition"}
+               "universe": tickers, "benchmarks": {"ETF": {str(3000 + i): 0.04 for i in range(10)}}, "benchmark_etf_ids": ["ETF"], "active_share_definition_confirmed": True, "active_share_definition": "top10_normalized", "active_share_min": 0.15, "as_of": "2026-10-27T07:02:00+08:00", "pricing_date": "2026-10-23", "mode": "competition"}
     return document, context
 
 
@@ -185,12 +185,12 @@ class CompetitionGateTests(unittest.TestCase):
             writer.writeheader()
             writer.writerows(self.rows)
         benchmark = self.root / "benchmarks.csv"
-        benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF,{3000+i},0.04\n" for i in range(10)), encoding="utf-8")
+        benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF,{3000+i},0.04\n" for i in range(15)), encoding="utf-8")
         self.settings = {"team_id": "TEAM_TEST", "initial_capital": 1000000000, "commission_rate": 0.001425, "tax_rate": 0.003, "lot": 1000, "universe_as_of": "2026-07-31"}
         self.runtime = {"competition": {"official_universe_path": str(universe), "universe_manifest": {"source_url": "https://www.esunbank.com/competition/universe", "confirmed": True, "sha256": hashlib.sha256(universe.read_bytes()).hexdigest(), "as_of": "2026-07-31"},
-                                        "benchmarks_path": str(benchmark), "benchmarks_manifest": {"source_url": "https://www.twse.com.tw/etf", "confirmed": True, "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(), "as_of": "2026-10-23", "etf_ids": ["ETF"], "definition": "top10_normalized"},
+                                        "benchmarks_path": str(benchmark), "benchmarks_manifest": {"source_url": "https://www.twse.com.tw/etf", "confirmed": True, "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(), "as_of": "2026-10-23", "etf_ids": ["ETF"], "definition": "top15_normalized"},
                                         "schedule_confirmed": True, "first_trade_date": "2026-10-27", "last_trade_date": "2026-11-30", "allow_degraded": False}}
-        self.benchmarks = {"ETF": {str(3000+i): 0.04 for i in range(10)}}
+        self.benchmarks = {"ETF": {str(3000+i): 0.04 for i in range(15)}}
         self.ledger = Ledger(Decimal("1000000000"), {}, last_settled_date="2026-10-23", reconciled=True)
         self.research = {"provider": "codex", "model": "actual-model", "success": True, "new_research": True, "synthetic": False, "completed_at": "2026-10-27T07:00:00+08:00"}
 

@@ -315,6 +315,11 @@ class ProviderSafetyTest(unittest.TestCase):
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
         self.assertEqual(command[-1], "-")
         self.assertIn("user model; $(untrusted)", command)
+        self.assertNotIn('model_reasoning_effort="xhigh"', command)
+        high = CodexCLIProvider(reasoning_effort="xhigh")._command("/bin/codex", Path("/tmp/research-isolated"))
+        self.assertIn('model_reasoning_effort="xhigh"', high)
+        with self.assertRaises(LLMError):
+            CodexCLIProvider(reasoning_effort="maximum")
         with patch.dict("os.environ", {"BROKER_SECRET": "not-for-child", "OPENAI_API_KEY": "not-for-child"}):
             environment = provider._environment()
         self.assertNotIn("BROKER_SECRET", environment)

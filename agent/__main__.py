@@ -49,7 +49,7 @@ def parser():
         q.add_argument('--source-url', required=True)
         q.add_argument('--as-of', required=True)
         q.add_argument('--confirm', action='store_true', help='僅在已核對官方完整資料後設定')
-        q.add_argument('--definition', choices=['top10_normalized', 'top10_raw', 'full_normalized'])
+        q.add_argument('--definition', choices=['top10_normalized', 'top10_raw', 'top15_normalized', 'top15_raw', 'full_normalized'])
     q = sub.add_parser('import-book', help='匯入主辦實際結算庫存')
     _common(q); q.add_argument('path', type=Path)
     q.add_argument('--pricing-date', type=parse_date, required=True)

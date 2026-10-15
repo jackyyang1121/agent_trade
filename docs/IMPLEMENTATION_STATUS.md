@@ -12,7 +12,7 @@
 | Phase 3：雙引擎 | 保留量化 baseline、獨立多時間尺度訊號、雙向候選、預期差代理、催化劑、情境與證據門檻融合、成本及風險約束 | 離線數值與安全測試覆蓋；初始參數為未校準 heuristic。缺共識或 OHLC 等資料時明示未知；相關性限制目前是逐對持股，不是完整群集上限 |
 | Phase 4：競賽整合 | Python 官方股數、費率與稅；D-Plan v4.2；來源版本鎖定；官方庫存匯入／對帳；送件收據與不可變紀錄 | Mock E2E 的 Schema／context 語意通過；正式模式阻擋 Mock／fixture、缺資料與未知實際模型。沒有自動競賽送件、券商下單或真實官方收件驗證 |
 | Phase 5：Forward | Q0／H1／H2 獨立帳本、不可變凍結、後續 VWAP 模擬結算、費用、NAV／MDD／換手／暴露、到期預測、基於凍結資料的錯過機會分類 | 離線多日、未到期、停牌缺價、版本與並發冪等測試可運行；尚未累積足以評估策略效果的真實多日資料。錯過機會分類不等於已證明因果或全自動事後產業調查 |
-| Phase 6：整合與操作 | 一鍵 CLI、相容 `run`、狀態與查詢、Markdown 報告、每組 checkpoint、文件、fixture 產生器與測試 | 已在 Linux 執行離線 CLI 與整合測試；提供 PowerShell 指令及 Windows `tzdata` 依賴，尚未在原生 Windows 完成執行驗證 |
+| Phase 6：整合與操作 | 一鍵 CLI、相容 `run`、狀態與查詢、Markdown 報告、每組 checkpoint、文件、fixture 產生器與測試 | 已在 Linux 執行離線 CLI 與整合測試；提供 bash 指令及 Windows `tzdata` 依賴，尚未在原生 Windows 完成執行驗證 |
 
 ## 模型、網路與資料庫限制
 
@@ -32,7 +32,7 @@
 
 開發過程已實跑 `status`、官方範例 `check`、合成 fixture 生成、Mock 離線 daily、三組產出附 context 的 `check`、`knowledge`／模擬庫查詢與 `evaluate`，並檢查文件本地連結。這些命令沒有啟動真實 GPT。
 
-完整測試入口為 `py -m unittest discover -s tests -v`。實際通過數與最新結果以測試輸出及 PR 驗證紀錄為準，本文不固定會隨新增案例變動的總數。離線工程驗證、未執行的 Live 整合、待提供官方資料與尚未驗證的投資效果分開記錄。
+完整測試入口為 `python -m unittest discover -s tests -v`。實際通過數與最新結果以測試輸出及 PR 驗證紀錄為準，本文不固定會隨新增案例變動的總數。離線工程驗證、未執行的 Live 整合、待提供官方資料與尚未驗證的投資效果分開記錄。
 
 ## 後續改進方向
 

@@ -671,6 +671,8 @@ def prepare(http: Http, settings: dict, strategy_factors: list[tuple[str, float,
             "content_as_of": item["as_of"],
             "fetched_at": fetched,
         }
+    for key, source in source_material.items():
+        source["key"] = key
     active_path = ACTIVE / f"{pricing.isoformat()}.csv"
     actives = []
     if active_path.exists():

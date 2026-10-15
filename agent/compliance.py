@@ -122,14 +122,14 @@ def validate_competition_inputs(
     if not isinstance(declared_ids, list) or not declared_ids or any(not isinstance(item, str) or not item for item in declared_ids) or len(set(declared_ids)) != len(declared_ids) or set(declared_ids) != set(benchmarks):
         errors.append("Active Share 缺少已確認完整 ETF 名單或基準覆蓋不完整")
     definition = bench_manifest.get("definition")
-    if definition not in {"top10_normalized", "top10_raw", "full_normalized"}:
-        errors.append("Active Share 計算定義尚未明確確認")
+    if definition not in {"top15_normalized", "top15_raw"}:
+        errors.append("Active Share 計算定義尚未明確確認；2026-10-05 公告改為前 15 大，權重是否重新正規化仍未確認")
     if not benchmarks:
         errors.append("Active Share 基準為空，禁止標記可提交")
     for etf_id, weights in benchmarks.items():
         try:
-            if len(weights) != 10 or any(not re.fullmatch(r"[0-9]{4}", str(ticker)) or not math.isfinite(float(weight)) or float(weight) <= 0 for ticker, weight in weights.items()):
-                raise ValueError("需要完整前十大正數權重")
+            if len(weights) != 15 or any(not re.fullmatch(r"[0-9]{4}", str(ticker)) or not math.isfinite(float(weight)) or float(weight) <= 0 for ticker, weight in weights.items()):
+                raise ValueError("需要完整前 15 大持股的正數權重")
             if sum(map(float, weights.values())) > 1.000001:
                 raise ValueError("基準原始權重總和超過 100%")
         except (AttributeError, TypeError, ValueError) as exc:

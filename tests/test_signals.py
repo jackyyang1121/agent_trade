@@ -209,6 +209,8 @@ class PortfolioRiskTest(unittest.TestCase):
         bench = {f"{i:04}": 0.04 for i in range(10, 30)}
         self.assertAlmostEqual(active_share(ours, bench, "top10_normalized"), 1)
         self.assertAlmostEqual(active_share(ours, bench, "top10_raw"), 0.4)
+        self.assertAlmostEqual(active_share(ours, bench, "top15_normalized"), 2 / 3)
+        self.assertAlmostEqual(active_share(ours, bench, "top15_raw"), 0.4)
         self.portfolio["require_benchmarks"] = True
         with self.assertRaises(PlanError):
             construct(self.scores, self.metrics, self.prices, self.industries, {}, Decimal("1000000000"),

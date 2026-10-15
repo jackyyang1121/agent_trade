@@ -51,8 +51,10 @@ def import_data(kind: str, path: Path, state_dir: Path, *, source_url: str, as_o
     parsed = read_universe(path) if kind == "universe" else read_benchmarks(path)
     if kind == "universe" and (len(parsed) != 150 or sum(r["market"] == "twse" for r in parsed) != 100 or sum(r["market"] == "tpex" for r in parsed) != 50):
         raise PlanError("官方股票池應為上市100檔＋上櫃50檔")
-    if kind == "benchmarks" and definition not in {"top10_normalized", "top10_raw", "full_normalized"}:
+    if kind == "benchmarks" and definition not in {"top10_normalized", "top10_raw", "top15_normalized", "top15_raw", "full_normalized"}:
         raise PlanError("請明確指定經主辦確認的 --definition；不得猜測 Active Share 公式")
+    if kind == "benchmarks" and str(definition).startswith("top15") and any(len(book) < 15 for book in parsed.values()):
+        raise PlanError("2026-10-05 公告改為前 15 大，每檔 ETF 需至少 15 筆真實持股")
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     destination = state_dir / "imports" / f"{kind}_{as_of}_{digest[:12]}.csv"
     destination.parent.mkdir(parents=True, exist_ok=True)

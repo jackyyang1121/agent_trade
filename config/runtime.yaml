@@ -2,15 +2,18 @@
 state_dir: data/runtime
 llm:
   provider: codex_cli
+  # 留空時沿用 Codex 帳號當下預設，不把型號寫死。
   model: null
-  timeout_seconds: 120
+  # 模型推理強度
+  reasoning_effort: xhigh
+  timeout_seconds: 3600
   max_retries: 1
   allow_live: false
 research:
   max_rounds: 3
   max_model_calls: 3
   max_sources: 20
-  max_seconds: 240
+  max_seconds: 3600
   max_tasks: 10
   allow_network: false
   allowed_domains: []
@@ -23,13 +26,23 @@ signals:
   max_correlated_weight: 0.25
   min_score_improvement: 0.15
 competition:
-  official_universe_path: null
+  # 已對過本機 PDF「玉山挑戰賽_投資組合及交易標的_150檔清單_v1」：上市 100、上櫃 50。
+  # 下載頁 HTTPS 尚未提供，不能 --confirm，正式模式仍阻擋。
+  official_universe_path: data/universe/universe.csv
   universe_manifest: null
   benchmarks_path: null
   benchmarks_manifest: null
+  # 2026-09-11 證交所揭露的主動 ETF 代號。沒有前 15 大持股與權重，不能當基準。
+  official_etf_list_path: data/reference/active_etfs.csv
+  official_etf_list_as_of: '2026-09-11'
+  # 2026-09-29 公告已確認首日；末日不在目前公告，整段賽程不標成已確認。
   schedule_confirmed: false
   first_trade_date: '2026-10-27'
   last_trade_date: null
+  # 2026-10-05 公告改為前 15 大、低於 15% 才違規。正規化口徑仍是 null。
+  active_share_top_n: 15
+  active_share_min: 0.15
+  active_share_definition: null
   allow_degraded: false
 forward:
   variants: [Q0, H1, H2]
