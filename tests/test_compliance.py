@@ -196,12 +196,13 @@ class CompetitionGateTests(unittest.TestCase):
         benchmark = self.root / "benchmarks.csv"
         benchmark.write_text("etf_id,ticker,weight\n" + "".join(f"ETF,{3000+i},0.04\n" for i in range(15)), encoding="utf-8")
         self.settings = {"team_id": "TEAM_TEST", "initial_capital": 1000000000, "commission_rate": 0.001425, "tax_rate": 0.003, "lot": 1000, "universe_as_of": "2026-07-31"}
-        # 舊官方 Schema 的測試替身；不代表正式 v4.3 已驗證。
-        self.runtime = {"competition": {"required_dplan_schema_version": "4.2", "official_universe_path": str(universe), "universe_manifest": {"source_url": "https://www.esunbank.com/competition/universe", "confirmed": True, "sha256": hashlib.sha256(universe.read_bytes()).hexdigest(), "as_of": "2026-07-31"},
+        self.runtime = {"competition": {"required_dplan_schema_version": "4.3", "official_universe_path": str(universe), "universe_manifest": {"source_url": "https://www.esunbank.com/competition/universe", "confirmed": True, "sha256": hashlib.sha256(universe.read_bytes()).hexdigest(), "as_of": "2026-07-31"},
                                         "benchmarks_path": str(benchmark), "benchmarks_manifest": {"source_url": "https://www.twse.com.tw/etf", "confirmed": True, "sha256": hashlib.sha256(benchmark.read_bytes()).hexdigest(), "as_of": "2026-10-23", "etf_ids": ["ETF"], "definition": "top15_normalized"},
                                         "schedule_confirmed": True, "first_trade_date": "2026-10-27", "last_trade_date": "2026-11-30", "allow_degraded": False}}
         self.benchmarks = {"ETF": {str(3000+i): 0.04 for i in range(15)}}
         self.ledger = Ledger(Decimal("1000000000"), {}, last_settled_date="2026-10-23", reconciled=True)
+        from tests.test_datapack import initial_pack
+        self.ledger.official_data = initial_pack()
         self.research = {"provider": "codex", "model": "actual-model", "success": True, "new_research": True, "synthetic": False, "completed_at": "2026-10-27T07:00:00+08:00"}
 
     def gate(self):
@@ -212,11 +213,13 @@ class CompetitionGateTests(unittest.TestCase):
 
     def test_missing_required_official_schema_blocks_formal_submission(self):
         self.runtime["competition"]["required_dplan_schema_version"] = "4.3"
-        with self.assertRaisesRegex(PlanError, "官方 D-Plan v4.3 Schema"):
-            self.gate()
+        with patch('agent.compliance.active_schema_version', return_value='4.2'):
+            with self.assertRaisesRegex(PlanError, "官方 D-Plan v4.3 Schema"):
+                self.gate()
 
     def test_formal_v43_requires_official_datapack_even_when_schema_is_available(self):
         self.runtime["competition"]["required_dplan_schema_version"] = "4.3"
+        self.ledger.official_data = {}
         with patch("agent.compliance.active_schema_version", return_value="4.3"):
             with self.assertRaisesRegex(PlanError, "官方 DataPack"):
                 self.gate()
@@ -243,6 +246,13 @@ class CompetitionGateTests(unittest.TestCase):
         before = {"as_of": "2026-10-23", "cash": context["cash"], "positions": context["held"]}
         book.reconcile(before, date(2026, 10, 23))
         self.ledger = book.get_ledger()
+        from tests.test_datapack import initial_pack
+        raw = initial_pack()
+        raw.update(as_of_date='2026-10-23')
+        raw['account'].update(cash=200000000, holdings_count=20, cash_ratio_tradable=0.2)
+        raw['holdings'] = [{'code': t, 'shares': n, 'receivable_shares': 0, 'close_price': 100, 'tradable_weight': 0.04}
+                           for t, n in self.ledger.positions.items()]
+        self.ledger.official_data = raw
         self.assertIsNone(self.gate())
         self.assertEqual(book.record_plan("formal-run", document, context)["state"], "GENERATED")
         self.assertEqual(book.transition("formal-run", "VALIDATED")["state"], "VALIDATED")

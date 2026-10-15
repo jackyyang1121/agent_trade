@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import ipaddress
 import json
 import re
@@ -161,6 +162,26 @@ class SourceConnector:
             raise SourceError("來源檔案不存在或超過資料量預算")
         return path.read_bytes(), "text/html" if path.suffix.lower() in {".html", ".htm"} else "text/plain"
 
+    def document(self, url: str) -> tuple[str, str]:
+        """擷取公開持股文件；內容日期由呼叫端另外核對。"""
+        raw, content_type, _ = self.fetch(url)
+        fetched = utc_now()
+        if raw.startswith(b"%PDF") or "pdf" in content_type.lower():
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw))
+            if reader.is_encrypted or len(reader.pages) > 100:
+                raise SourceError("不擷取加密或超過頁數預算的 PDF")
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        else:
+            text = raw.decode("utf-8-sig", errors="replace")
+            if "html" in content_type.lower():
+                parser = _DocumentParser()
+                parser.feed(text)
+                text = "\n".join(parser.parts)
+        if not text.strip():
+            raise SourceError("來源正文為空")
+        return text[:max(self.max_chars, 100000)], fetched
+
     def ingest(self, manifest: dict, as_of: str) -> dict:
         """回傳可封存的 source。無法取得/無日期也保留 unavailable 紀錄。"""
         if not isinstance(manifest, dict):
@@ -214,10 +235,25 @@ class SourceConnector:
                 if "html" in content_type.lower() or re.search(r"<html\b", body[:500], re.I):
                     parser = _DocumentParser()
                     parser.feed(body)
+                    if not parser.published_at:
+                        published = re.search(r'"datePublished"\s*:\s*"([^"\n]+)"', body)
+                        if published:
+                            try:
+                                timestamp(published[1])
+                                parser.published_at = published[1]
+                            except SourceError:
+                                pass
                     body = "\n".join(parser.parts)
                     if source["title"] == "未提供標題" and parser.title:
                         source["title"] = " ".join(parser.title)
-                    source["published_at"] = source["published_at"] or parser.published_at
+                    if source.get("discovery_method"):
+                        if not parser.published_at:
+                            raise SourceError("原頁無可核對的發布時間，不能採用模型猜測的日期")
+                        source["published_at"] = parser.published_at
+                        source["content_as_of"] = parser.published_at
+                        source["content_time_basis"] = "verified_original_page_publication_proxy"
+                    else:
+                        source["published_at"] = source["published_at"] or parser.published_at
             if not body.strip():
                 raise SourceError("來源擷取為空")
             if self.config.get("live_as_of"):

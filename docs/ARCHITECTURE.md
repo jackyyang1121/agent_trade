@@ -32,7 +32,7 @@ flowchart TD
 | `agent/knowledge/` | SQLite 來源、Entity／Edge、Thesis 版本、研究記憶與新穎性 |
 | `agent/signals/` | 可獨立觀察的 Quant／Research 訊號及透明融合 |
 | `agent/portfolio.py` | 既有持股、交易成本、集中度與約束配置 |
-| `agent/dplan.py`、`agent/checks.py` | 官方 v4.2 輸出、引用鏈與數值語意驗證 |
+| `agent/dplan.py`、`agent/checks.py` | 官方 v4.3 輸出、引用鏈與數值語意驗證 |
 | `agent/ledger.py` | 正式庫存／現金與提交生命週期 |
 | `agent/evaluation/` | Q0／H1／H2 獨立 Forward 帳本、預測到期與績效 |
 
@@ -53,9 +53,17 @@ data/runtime/
   shadow/<版本雜湊>/forward.sqlite3      # 三組獨立邏輯帳本
   shadow/<版本雜湊>/evaluation.md        # 可重新產生的評估報告
   personal/                             # 個人模式隔離的 Forward 狀態
+  rehearsal/research.sqlite3             # 演練研究記憶，正式帳戶與 Forward 隔離
+
+決策報告繳交紀錄/<模式>/<交易日>/<run_id>/ # 人讀報告、D-Plan 與 context
+DataPack/official/                       # 正式後台帳戶與淨值原檔
+DataPack/simulated/                      # 帶 _simulation 標記的全現金演練帳戶
+DataPack/benchmarks.csv                  # ETF 原始權重、資料日期、來源及 hash
 ```
 
-每日 artifact 另外按模式、程式／設定版本與交易日保存 `summary.json`、行情快照、研究輸出、D-Plan、驗證 context 與 `研究報告.md`。Forward 資料庫中的三個組合獨立記錄現金、股數與結算，不是共用一個投資組合。
+`rehearse --live` 不使用 ForwardTracker 或 CompetitionBook，以可驗證的模擬初始帳戶預覽真實模型報告，無正式收件窗限制；每次演練保留獨立識別。來源探索與 ETF 更新可使用原生 web search，其餘模型分析禁用工具。
+
+每日內部 artifact 另外按模式、程式／設定版本與交易日保存 `summary.json`、行情快照、研究輸出、D-Plan、驗證 context 與 `研究報告.md`。Forward 資料庫中的三個組合獨立記錄現金、股數與結算，不是共用一個投資組合。
 
 來源依 URL／內容 hash／事件相似性去重，保留原始來源時間、取得時間及更新紀錄。知識關係與 Thesis 更新保留舊版本，不以今天的資訊覆蓋昨天的判斷。支持及反方證據鎖定 `source_id + version`，由 Thesis、ResearchSignal、融合決策一路帶入 D-Plan 對應的原文版本；來源更新不會悄悄換掉舊決策依據。Confidence 是未校準的證據等級，不是成功機率。
 

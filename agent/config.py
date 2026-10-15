@@ -18,19 +18,24 @@ BENCHMARK_PATH = ROOT / "config" / "benchmarks.csv"
 UNIVERSE_OVERRIDE = ROOT / "config" / "universe.csv"
 FUNDAMENTALS_PATH = ROOT / "config" / "fundamentals.csv"
 LEDGER_PATH = ROOT / "data" / "state" / "ledger.json"
-NAV_DIR = ROOT / "淨值紀錄"
+NAV_DIR = ROOT / "DataPack" / "legacy"
 DECISION_DIR = ROOT / "決策報告繳交紀錄"
 PREVIEW_DIR = ROOT / "data" / "preview"
 INBOX_BOOK = ROOT / "inbox" / "official_book.json"
 
 
 def active_schema_version() -> str:
-    """版本由實際官方 Schema 取得，不能把舊 Schema 改名假裝升級。"""
+    """官方新版使用 4.x pattern，舊版使用 const；以內容驗證輸出版本。"""
+    import jsonschema
     try:
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        version = schema["properties"]["schema_version"]["const"]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise PlanError("無法確認 D-Plan 官方 Schema 的固定版本") from exc
+        rule = schema["properties"]["schema_version"]
+        version = rule.get("const", "4.3")
+        if "const" not in rule and "pattern" not in rule and "enum" not in rule:
+            raise ValueError("Schema 未宣告支援版本")
+        jsonschema.Draft202012Validator(rule).validate(version)
+    except (OSError, ValueError, KeyError, TypeError, jsonschema.ValidationError) as exc:
+        raise PlanError("無法確認 D-Plan 官方 Schema 支援的版本") from exc
     if not isinstance(version, str):
         raise PlanError("D-Plan Schema 版本必須是字串")
     return version

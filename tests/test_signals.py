@@ -146,6 +146,20 @@ class ResearchFusionTest(unittest.TestCase):
         self.assertTrue(d["eligible"])
         self.assertLessEqual(d["max_weight"], 0.02)
 
+    def test_reviewed_qualitative_evidence_can_explore_without_invented_consensus(self):
+        item = thesis(status="early_validation", evidence_strength="medium",
+                      fundamental_surprise={"baseline_type": "unknown", "baseline": None, "observation": None, "source_ids": []},
+                      risks=[{"description": "尚未證實的量產風險", "status": "risk_hypothesis", "source_ids": []}],
+                      scenarios=[{"name": n, "description": "情境假說", "upside": None, "downside": None} for n in ('bull', 'base', 'bear')])
+        signal = research_signal(item, "2026-04-02")
+        self.assertFalse(signal['surprise_verifiable'])
+        self.assertEqual(signal['stage'], 'early_validation')
+        decision = fuse({}, [signal], 'H2')['2300']
+        self.assertTrue(decision['eligible'])
+        self.assertLessEqual(decision['max_weight'], .02)
+        item['adversarial_reviewed'] = False
+        self.assertEqual(research_signal(item, '2026-04-02')['stage'], 'early_discovery')
+
     def test_broken_thesis_prevents_hybrid_automatic_addition(self):
         r = research_signal(thesis(status="invalidated"), "2026-04-02")
         self.assertFalse(fuse(self.q, [r], "H2")["2300"]["eligible"])

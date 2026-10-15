@@ -224,6 +224,8 @@ class ResearchEngine:
                 enqueue({"kind": "search", "query": str(query), "ticker": None,
                          "url": None, "reason": "technology_first_discovery", "source_ids": []})
             followup()
+            if self.config.get("require_sources") and not any(self._available(s, as_of) for s in archived.values()):
+                raise ResearchError("沒有可讀、具發布時間的來源正文；" + "；".join(limitations[-5:]))
             rounds = min(max_rounds, max_calls)
             for index in range(rounds):
                 if self.config.get("live_as_of"):

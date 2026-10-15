@@ -47,12 +47,12 @@ Live 測試獨立且必須明確選擇，會使用帳號額度：
 codex --version
 codex exec --help
 codex login status
-python -m agent research --ticker 3363 --provider codex_cli --live
+python -m agent rehearse --live --skip-benchmarks
 ```
 
 `status`／doctor 檢查版本、參數與登入不等於執行投資研究。請檢查研究執行紀錄中的 provider、實際模型、來源、時間、錯誤與用量；未知 token 數保持省略，不能編造。Codex JSONL 若沒有實際模型，不能用 `model_requested` 冒充；正式模式應維持阻擋。Adapter 已實作但尚未完成真實研究 Live 驗證。不要在單元測試中反覆啟動真實 Codex，也不要把 Codex 自己的執行環境當成可無限制遞迴的 worker。
 
-測試中外部研究來源的預設 `allowed_domains: []` 必須拒絕下載；Live 示範須先配置合法可信網域，不能只加 `--live` 就認為任意網站已允許。Windows 的 `tzdata` 安裝列入依賴，原生 Windows 執行仍待獨立驗證。
+測試中空的 `allowed_domains: []` 必須拒絕下載；預設 runtime 已配置可信公開網域，Live 來源仍需受該白名單約束，不能只加 `--live` 就認為任意網站已允許。Windows 的 `tzdata` 安裝列入依賴，原生 Windows 執行仍待獨立驗證。
 
 真實行情測試另需網路允許 TWSE／TPEx 等必要網域。HTTP 403 或代理拒絕時應記錄阻擋，不改用虛構即時行情。離線整合通過與真實來源、Codex 或正式競賽已驗證是不同結論。
 
