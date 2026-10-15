@@ -68,7 +68,11 @@ def render_dplan(
     finished: datetime,
     http_calls: int,
     band: float,
+    research_evidence: dict[str, list[dict]] | None = None,
+    decision_context: dict[str, dict] | None = None,
 ) -> dict:
+    research_evidence = research_evidence or {}
+    decision_context = decision_context or {}
     stance = stance_of(regime, plan.intent)
     source_ids: dict[str, str] = {}
     source_rows = []
@@ -227,13 +231,24 @@ def render_dplan(
                 "logic": _clip(text, 1000),
                 "conclusion": _clip(conclusion, 300),
                 "counter_evidence": _clip(counter_text, 500) if counter_text else None,
-                "confidence": 0.7 if abs(scores.get(premise and "", 0) or 0) < 2 else 0.62,
             }
         )
         return iid
 
     decision_rows = []
     inference_of: dict[str, str] = {}
+
+    def evidence_observations(ticker: str) -> list[str]:
+        refs = []
+        for evidence in research_evidence.get(ticker, [])[:3]:
+            key = evidence["key"]
+            if key not in source_ids:
+                continue
+            refs.append(add_obs([key, "tpex" if markets.get(ticker) == "tpex" and "tpex" in source_ids else "twse"],
+                                f"來源摘錄（非獲利保證）：{evidence['excerpt']}；{ticker} 定價收盤 {prices[ticker]:.2f} 元",
+                                {"close": prices[ticker]}, "research"))
+        return refs
+
     for index, item in enumerate(decisions, start=1):
         ticker = item["ticker"]
         name = names.get(ticker, ticker)
@@ -246,6 +261,11 @@ def render_dplan(
             f"{name}（{ticker}）綜合分數 {score:.2f}（{comp_text}），"
             f"由持股 {item['old']} 股調到目標權重 {item['target_weight']:.2%}。"
         )
+        context = decision_context.get(ticker)
+        if context:
+            reason = context.get("reason", "量化規則決策")
+            text = f"對照「{prospectus['name']}」。" + ("；".join(reason) if isinstance(reason, list) else str(reason))
+            text += f"；確定性風控後目標權重 {item['target_weight']:.2%}。"
         if funding:
             text += "這筆賣出同時用來騰出現金：它在目前持股裡分數較低，讓位對組合的因子暴露影響較小。"
         if metrics.get(ticker, {}).get("rev_yoy") is None and "growth" in enabled:
@@ -259,6 +279,12 @@ def render_dplan(
         premise = [stock_obs[ticker]]
         if len(basis) > 1:
             premise.append(basis[min(1, len(basis) - 1)])
+        # Schema 的 values 必須含數字：引用真實定價，不捏造質性證據的0/1值。
+        premise.extend(evidence_observations(ticker))
+        risks = [risk.get("description", "") for signal in (context or {}).get("research", [])
+                 for risk in signal.get("risks", []) if risk.get("description")]
+        if risks:
+            local_counter = "研究風險（未驗證者仍屬假說）：" + "；".join(risks)
         iid = add_inf(premise, text, local_counter, f"{item['action']} {ticker} 至權重 {item['target_weight']:.2%}")
         inference_of[ticker] = iid
         row = {
@@ -286,7 +312,10 @@ def render_dplan(
             f"{name}（{ticker}）綜合分數 {score:.2f}，現有權重 {old_weight:.2%} 與目標的差距未超過再平衡門檻 {band:.2%}，"
             f"沒有觸發加減碼，續抱原股數。"
         )
-        iid = add_inf([stock_obs[ticker], obs_taiex], text, None, f"{ticker} 續抱")
+        if decision_context.get(ticker):
+            reason = decision_context[ticker].get("reason", text)
+            text = ("；".join(reason) if isinstance(reason, list) else str(reason)) + "；風控後維持原股數。"
+        iid = add_inf([stock_obs[ticker], obs_taiex] + evidence_observations(ticker), text, None, f"{ticker} 續抱")
         no_trade_rows.append({"ticker": ticker, "reason_refs": [iid], "reason": _clip(f"偏離未逾 {band:.2%} 再平衡門檻", 300)})
 
     orders = []
@@ -328,7 +357,6 @@ def render_dplan(
                 "target_cash_pct_range": [plan.cash_low, plan.cash_high],
             },
             "counter_evidence": counter_text,
-            "confidence": 0.66,
         },
         "inferences": inferences,
         "decisions": decision_rows,

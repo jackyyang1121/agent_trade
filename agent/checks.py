@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import re
+from datetime import date, datetime
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -15,9 +18,19 @@ def schema_errors(doc: dict) -> list[str]:
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     errors = []
-    for error in sorted(validator.iter_errors(doc), key=lambda item: list(item.path)):
+    for error in sorted(validator.iter_errors(doc), key=lambda item: tuple(map(str, item.path))):
         path = "/".join(str(part) for part in error.path) or "(root)"
         errors.append(f"{path}: {error.message}")
+    def finite(value, path="(root)"):
+        if isinstance(value, float) and not math.isfinite(value):
+            errors.append(f"{path}: JSON 數值必須有限")
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                finite(child, f"{path}/{key}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                finite(child, f"{path}/{index}")
+    finite(doc)
     return errors
 
 
@@ -29,10 +42,65 @@ def _ids(items: list[dict], key: str, prefix: str) -> list[str]:
     return []
 
 
-def semantic_errors(doc: dict, ctx: dict) -> tuple[list[str], list[str]]:
+def structural_errors(doc: dict, *, as_of=None, competition: bool = False, data_as_of=None) -> list[str]:
+    """Validate schema, timestamps and evidence links without a portfolio book."""
     errors: list[str] = []
-    warnings: list[str] = []
     errors.extend(schema_errors(doc))
+    # The schema guards every indexed field below. Never inspect malformed layers.
+    if errors:
+        return errors
+    metadata = doc["agent_metadata"]
+    times = {}
+    for key in ("run_started_at", "run_completed_at"):
+        try:
+            times[key] = datetime.fromisoformat(metadata[key])
+        except ValueError:
+            errors.append(f"agent_metadata/{key}: 無效日期時間")
+    try:
+        date.fromisoformat(doc["trade_date"])
+    except ValueError:
+        errors.append("trade_date: 無效日期")
+    started, finished = times.get("run_started_at"), times.get("run_completed_at")
+    if started and finished and started > finished:
+        errors.append("研究起始時間晚於完成時間")
+    received = as_of
+    if received is not None:
+        try:
+            received = datetime.fromisoformat(received) if isinstance(received, str) else received
+            if received.tzinfo is None:
+                raise ValueError("timezone required")
+            if finished and finished > received:
+                errors.append("研究完成時間晚於驗證/收件時間")
+        except (AttributeError, ValueError, TypeError):
+            errors.append("驗證時點必須包含有效時區")
+            received = None
+    cutoff = min(finished, received) if finished and received else finished or received
+    if data_as_of is not None:
+        try:
+            data_cutoff = datetime.fromisoformat(data_as_of) if isinstance(data_as_of, str) else data_as_of
+            if data_cutoff.tzinfo is None:
+                raise ValueError("timezone required")
+            cutoff = min(cutoff, data_cutoff) if cutoff else data_cutoff
+        except (AttributeError, ValueError, TypeError):
+            errors.append("資料截止時點必須包含有效時區")
+    for source in doc["sources"]:
+        address = urlparse(source["url"])
+        if address.scheme not in {"http", "https"} or not address.hostname:
+            errors.append(f"{source['source_id']} 來源必須是 HTTP(S) 公開網址")
+        if competition and address.hostname and (address.hostname in {"localhost", "127.0.0.1", "example.com", "example.org"} or address.hostname.endswith((".invalid", ".test", ".localhost"))):
+            errors.append(f"{source['source_id']} 正式來源不能使用範例或本機網址")
+        parsed = {}
+        for key in ("content_as_of", "published_at", "fetched_at"):
+            if key not in source:
+                continue
+            try:
+                parsed[key] = datetime.fromisoformat(source[key])
+                if cutoff and parsed[key] > cutoff:
+                    errors.append(f"{source['source_id']}/{key} 使用決策完成後才可得的資料")
+            except ValueError:
+                errors.append(f"{source['source_id']}/{key} 無效日期時間")
+        if parsed.get("published_at") and parsed.get("fetched_at") and parsed["published_at"] > parsed["fetched_at"]:
+            errors.append(f"{source['source_id']} 發布時間晚於抓取時間")
     errors.extend(_ids(doc["sources"], "source_id", "S"))
     errors.extend(_ids(doc["observations"], "obs_id", "O"))
     errors.extend(_ids(doc["inferences"], "inf_id", "I"))
@@ -72,10 +140,71 @@ def semantic_errors(doc: dict, ctx: dict) -> tuple[list[str], list[str]]:
     for order in doc["orders"]:
         if order["decision_ref"] not in decision_ids:
             errors.append(f"{order['ticker']} 委託引用不存在的決策 {order['decision_ref']}")
+    return errors
 
-    held = {str(k): int(v) for k, v in ctx["held"].items() if int(v) > 0}
-    prices = ctx["prices"]
-    nav = float(ctx["pre_nav"])
+
+def semantic_errors(doc: dict, ctx: dict | None = None) -> tuple[list[str], list[str]]:
+    errors = schema_errors(doc)
+    warnings: list[str] = []
+    if errors:
+        return errors, warnings
+    ctx = ctx or {}
+    competition = ctx.get("mode") == "competition" or ctx.get("competition") is True
+    validation_time = ctx.get("validation_time") or ctx.get("received_at") or ctx.get("as_of")
+    errors = structural_errors(doc, as_of=validation_time, competition=competition,
+                               data_as_of=ctx.get("as_of") if ctx.get("validation_time") or ctx.get("received_at") else None)
+    decision_ids = {item["decision_id"] for item in doc["decisions"]}
+    decisions = {item["decision_id"]: item for item in doc["decisions"]}
+
+    missing_context = {"held", "prices", "pre_nav", "cash", "commission", "tax"} - set(ctx)
+    if missing_context:
+        errors.append("缺少必要的帳本/價格驗證 context：" + ",".join(sorted(missing_context)))
+        return errors, warnings
+    try:
+        held = {}
+        for ticker, value in ctx["held"].items():
+            shares = Decimal(str(value))
+            if isinstance(value, bool) or not shares.is_finite() or shares < 0 or shares != shares.to_integral_value() or shares % 1000:
+                raise ValueError(f"{ticker} 持股必須是非負千股整數")
+            if shares:
+                held[str(ticker)] = int(shares)
+        prices = dict(ctx["prices"])
+        if not isinstance(prices, dict):
+            raise ValueError("prices 必須是股票價格物件")
+        nav = float(ctx["pre_nav"])
+        for key in ("cash", "commission", "tax"):
+            value = Decimal(str(ctx[key]))
+            if not value.is_finite() or value < 0:
+                raise ValueError(f"{key} 必須是有限非負數")
+    except (AttributeError, TypeError, ValueError, ArithmeticError) as exc:
+        errors.append(f"帳本/價格驗證 context 無效：{exc}")
+        return errors, warnings
+    required_tickers = set(held) | {item["ticker"] for item in doc["orders"]} | {item["ticker"] for item in doc["decisions"]}
+    invalid_prices = set()
+    for ticker in required_tickers:
+        try:
+            price = float(prices[ticker])
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError("not positive and finite")
+            prices[ticker] = price
+        except (TypeError, ValueError, KeyError):
+            invalid_prices.add(ticker)
+            errors.append(f"{ticker} 缺少有限正數的必要定價資料（停牌/無成交時禁止推測價格）")
+    if not math.isfinite(nav) or nav <= 0:
+        errors.append("前日淨值必須是有限正數")
+    universe = ctx.get("universe") or ctx.get("universe_rows")
+    if universe:
+        allowed = {str(item["ticker"]) if isinstance(item, dict) else str(item) for item in universe}
+        unknown = required_tickers - allowed
+        if unknown:
+            errors.append("股票不在固定合格股票池：" + ",".join(sorted(unknown)))
+    elif competition:
+        errors.append("正式競賽缺少固定合格股票池")
+    if invalid_prices or not math.isfinite(nav) or nav <= 0:
+        return errors, warnings
+    observed_nav = Decimal(str(ctx["cash"])) + sum((Decimal(shares) * Decimal(str(prices[ticker])) for ticker, shares in held.items()), Decimal(0))
+    if abs(observed_nav - Decimal(str(nav))) > Decimal("0.02"):
+        errors.append("前日淨值與已確認現金及持股估值不一致")
     decision_tickers = [item["ticker"] for item in doc["decisions"]]
     hold_tickers = [item["ticker"] for item in doc["no_trade_decisions"]]
     if len(decision_tickers) != len(set(decision_tickers)):
@@ -181,11 +310,13 @@ def semantic_errors(doc: dict, ctx: dict) -> tuple[list[str], list[str]]:
     if funding_ids:
         kept = []
         for order in doc["orders"]:
-            dec = decisions[order["decision_ref"]]
+            dec = decisions.get(order["decision_ref"])
+            if dec is None:
+                continue
             if dec["decision_id"] in funding_ids:
                 continue
             kept.append(order)
-        cash_wo, nav_wo, _pos, _buy, _sell = estimate(cash, held, kept, prices, commission, tax)
+        cash_wo, nav_wo, _pos, _buy, _sell = estimate(cash, held, kept, prices, commission, tax, allow_negative_cash=True)
         pct_wo = float(cash_wo / nav_wo) if nav_wo else -1
         low = doc["market_view"]["posture"]["target_cash_pct_range"][0]
         if pct_wo >= low - 1e-9:
@@ -194,13 +325,30 @@ def semantic_errors(doc: dict, ctx: dict) -> tuple[list[str], list[str]]:
     our = {}
     if nav_after > 0:
         for ticker, shares in positions.items():
-            our[ticker] = shares * prices[ticker] / float(ctx["pre_nav"])
+            our[ticker] = shares * prices[ticker] / float(nav_after)
     benchmarks = ctx.get("benchmarks") or {}
     if not benchmarks:
-        warnings.append("沒有主動 ETF 前十大持股，Active Share 這條競賽限制尚未檢查")
+        message = "沒有主動 ETF 前十大持股，Active Share 這條競賽限制尚未檢查"
+        (errors if competition else warnings).append(message)
     else:
+        if competition and not ctx.get("active_share_definition_confirmed"):
+            errors.append("Active Share 官方計算定義尚未確認")
+        expected = set(ctx.get("benchmark_etf_ids") or [])
+        if expected and expected != set(benchmarks):
+            errors.append("Active Share 基準名單與已確認完整清單不一致")
         for etf_id, bench in benchmarks.items():
-            score = active_share(our, bench)
+            try:
+                valid_weights = isinstance(bench, dict) and len(bench) == 10 and all(math.isfinite(float(value)) and float(value) > 0 for value in bench.values())
+            except (ValueError, TypeError):
+                valid_weights = False
+            if not valid_weights:
+                errors.append(f"{etf_id} 基準缺少完整前十大正數權重")
+                continue
+            try:
+                score = active_share(our, bench, ctx.get("active_share_definition", "top10_normalized"))
+            except (ValueError, PlanError) as exc:
+                errors.append(f"{etf_id} Active Share 定義無效：{exc}")
+                continue
             if score < float(ctx.get("active_share_min", 0.20)) - 1e-9:
                 errors.append(f"相對 {etf_id} 的 Active Share {score:.2%} 低於 20%")
     return errors, warnings

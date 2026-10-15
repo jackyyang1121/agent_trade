@@ -347,7 +347,9 @@ def _read_universe(path: Path) -> list[dict]:
     return rows
 
 
-def load_universe(http: Http, as_of: date, listed_n: int, otc_n: int, closed: set[date]) -> list[dict]:
+def load_universe(http: Http, as_of: date, listed_n: int, otc_n: int, closed: set[date], path_override: Path | None = None) -> list[dict]:
+    if path_override:
+        return _read_universe(path_override)
     if UNIVERSE_OVERRIDE.exists():
         rows = _read_universe(UNIVERSE_OVERRIDE)
         if rows:
@@ -357,6 +359,11 @@ def load_universe(http: Http, as_of: date, listed_n: int, otc_n: int, closed: se
         rows = _read_universe(UNIVERSE_PATH)
         if len(rows) >= listed_n:
             return rows
+    raise PlanError("缺少固定股票池；請匯入主辦方名單，不自動重算市值排名。可用 import-universe PATH")
+
+
+def build_research_universe(http: Http, as_of: date, listed_n: int, otc_n: int, closed: set[date]) -> list[dict]:
+    """僅供顯式研究用途；產出不是已確認的競賽官方股票池。"""
     ensure_day(http, as_of, required=True)
     companies = _companies(http)
     book = {row["ticker"]: row for row in read_daily(as_of)}
@@ -522,7 +529,8 @@ def prepare(http: Http, settings: dict, strategy_factors: list[tuple[str, float,
     if as_of not in closed and as_of.weekday() < 5 and as_of < start:
         start = as_of
     ensure_history(http, start, pricing, closed)
-    universe = load_universe(http, as_of, int(settings["universe_listed"]), int(settings["universe_otc"]), closed)
+    universe = load_universe(http, as_of, int(settings["universe_listed"]), int(settings["universe_otc"]), closed,
+                             Path(settings["official_universe_path"]) if settings.get("official_universe_path") else None)
     companies = _companies(http)
     tickers = [row["ticker"] for row in universe]
     for ticker in held:
@@ -535,6 +543,7 @@ def prepare(http: Http, settings: dict, strategy_factors: list[tuple[str, float,
     names = {row["ticker"]: row["name"] for row in universe}
     markets = {row["ticker"]: row["market"] for row in universe}
     industries = {row["ticker"]: row["industry"] for row in universe}
+    history_rows = {ticker: [] for ticker in tickers}
     for day in days:
         book = {row["ticker"]: row for row in read_daily(day)}
         if not book:
@@ -543,6 +552,8 @@ def prepare(http: Http, settings: dict, strategy_factors: list[tuple[str, float,
         for ticker in tickers:
             row = book.get(ticker)
             if row and row["close"] > 0:
+                history_rows[ticker].append({"date": day.isoformat(), "close": row["close"], "volume": row["volume"],
+                                             "turnover": row["value"], "value": row["value"], "vwap": row["vwap"]})
                 closes[ticker].append(row["close"])
                 values[ticker].append(row["value"] if row["value"] > 0 else None)
                 names.setdefault(ticker, row["name"])
@@ -665,7 +676,7 @@ def prepare(http: Http, settings: dict, strategy_factors: list[tuple[str, float,
     if active_path.exists():
         with active_path.open(encoding="utf-8", newline="") as handle:
             actives = list(csv.DictReader(handle))
-    ref = ROOT / "data" / "reference"
+    ref = CACHE / "reference"
     ref.mkdir(parents=True, exist_ok=True)
     with (ref / "active_etfs.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=["ticker", "name", "market"])
@@ -692,4 +703,7 @@ def prepare(http: Http, settings: dict, strategy_factors: list[tuple[str, float,
         "source_material": source_material,
         "active_etfs": actives,
         "universe_count": len(universe),
+        "universe": universe,
+        "histories": history_rows,
+        "taiex_history": taiex_rows,
     }
