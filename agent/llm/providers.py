@@ -192,7 +192,13 @@ class CodexCLIProvider:
             "--config", "shell_environment_policy.inherit=\"none\"",
             "--config", "mcp_servers={}",
         ]
-        for feature in self.DISABLE_FEATURES:
+        # Codex 0.159 routes the hosted web_search tool through code_mode_host.
+        # Keep that feature only while search is requested. code_mode, shell, and
+        # command_execution remain disabled and are still rejected from events.
+        disabled = self.DISABLE_FEATURES
+        if self.web_search:
+            disabled = tuple(feature for feature in disabled if feature != "code_mode_host")
+        for feature in disabled:
             command.extend(["--disable", feature])
         if self.model:
             command.extend(["--model", self.model])

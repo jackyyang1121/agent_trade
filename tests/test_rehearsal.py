@@ -105,7 +105,14 @@ class EvidenceTests(unittest.TestCase):
         commands = CodexCLIProvider(web_search=True)._command('/bin/codex', self.root)
         self.assertIn('web_search="live"', commands)
         self.assertIn('shell_tool', commands)
+        self.assertIn('code_mode', commands)
         self.assertIn('read-only', commands)
+        disabled = [commands[index + 1] for index, flag in enumerate(commands) if flag == '--disable']
+        self.assertNotIn('code_mode_host', disabled)
+        analysis = CodexCLIProvider()._command('/bin/codex', self.root)
+        analysis_disabled = [analysis[index + 1] for index, flag in enumerate(analysis) if flag == '--disable']
+        self.assertIn('code_mode_host', analysis_disabled)
+        self.assertIn('web_search="disabled"', analysis)
         event = json.dumps({'type': 'item.completed', 'item': {'type': 'web_search', 'action': {'url': 'https://www.twse.com.tw/'}}})
         with self.assertRaises(Exception):
             CodexCLIProvider._metadata(event)
